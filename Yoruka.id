@@ -1,0 +1,2398 @@
+-- ============================================================
+-- MEGA FINAL: Morgue + OC1DvHUB Engines + New UI v8.3
+-- Rumah = NEW UI version | FARM TASK, Collect, ESP, Movement, Anti, Tools, Settings = dari versi lama
+-- ============================================================
+
+-- ═══════════════════════════════════════════════════════════
+-- PART 1: MORGUE ENGINE
+-- ═══════════════════════════════════════════════════════════
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local TeleportService = game:GetService("TeleportService")
+local TweenService = game:GetService("TweenService")
+local VirtualInputManager = game:GetService("VirtualInputManager")
+local HttpService = game:GetService("HttpService")
+local GuiService = game:GetService("GuiService")
+local CoreGui = game:GetService("CoreGui")
+local VirtualUser = game:GetService("VirtualUser")
+local UIS = game:GetService("UserInputService")
+local Lighting = game:GetService("Lighting")
+local MarketplaceService = game:GetService("MarketplaceService")
+local PathfindingService = game:GetService("PathfindingService")
+local StatsSvc = game:GetService("Stats")
+
+local localPlayer = Players.LocalPlayer
+local playerGui = localPlayer:WaitForChild("PlayerGui", 25)
+local env = getgenv()
+
+if env.MorgueMini and type(env.MorgueMini.Unload) == "function" then pcall(env.MorgueMini.Unload) end
+if env.Oc1DvHUB and type(env.Oc1DvHUB.Unload) == "function" then pcall(env.Oc1DvHUB.Unload) end
+
+local State = {
+	Unloaded=false, SessionId=HttpService:GenerateGUID(false):sub(1,8), ConfigPath="MorgueMini_Config.json",
+	AutoFarm=false, AutoStartSolo=false, AutoMinigame=false, Noclip=false, TweenMode=false,
+	TweenSpeed=18, WalkTimeout=20,
+	IsLobby = game.PlaceId == 122093998639862,
+	PromptBusy=false, MinigameBusy=false, EventBusy=false,
+	ActivePrompt=nil, ActivePromptKey=nil, PromptHoldHumanoid=nil, PromptHoldRoot=nil,
+	PromptOriginalAutoRotate=nil, PromptOriginalAnchored=nil,
+	UrgentEventPrompt=nil, UrgentRetryAt=0, UrgentPromptBaseline=nil,
+	UrgentPromptTriggered=false, UrgentConfirmUntil=0, UrgentPromptIsJumpscare=false,
+	Connections={}, Threads={}, WorkerCoroutine=nil,
+	Prompts={}, PromptKnown={}, InitialPrompts={},
+	Cooldowns=setmetatable({},{__mode="k"}), ForcePromptReposition=setmetatable({},{__mode="k"}),
+	HandledEventPrompts=setmetatable({},{__mode="k"}), CountedJumpscarePrompts=setmetatable({},{__mode="k"}),
+	TrolleyCarryState=nil, LiftTransportObjective=nil, LiftTransportPhase=nil,
+	LiftExitCFrame=nil, LiftTransportConfirmUntil=0, Room101AnchorObjective=nil,
+	TransportDestinationObjective=nil, TransportDestinationPrompt=nil,
+	TransportProgressObjective=nil, TransportProgressUntil=0,
+	ShiftCompletedLatched=false, LastLobbyCreateAt=0, LastPhoneAt=0, LastHeartbeatAt=os.clock(),
+	Stats={ShiftsCompleted=0,MinigamesSolved=0,JumpscaresCleared=0,CallsHandled=0,InGroup=false},
+	ActiveHandler="idle",
+	Status={Message="Ready",Phase="idle",UpdatedAt=os.clock()}
+}
+env.MorgueMini = State
+
+local liftExitCFrame = CFrame.new(56.418888092041,4.6480898857117,-75.33797454834,0.99992394447327,5.2547104445466e-08,-0.012332272715867,-5.1342574636237e-08,1,9.7989847347435e-08,0.012332272715867,-9.7349229122301e-08,0.99992394447327)
+local room101StandCFrame = CFrame.new(28.6971836,30.7848854,-63.455822,0.999983191,8.07611866e-10,-0.00580051122,-7.58790031e-10,1,8.41901393e-09,0.00580051122,-8.4144709e-09,0.999983191)
+local fluidStandCFrame = CFrame.new(30.075775146484,17.784885406494,-42.046188354492,0.011468937620521,2.6097806138381e-09,0.99993425607681,7.4065460431427e-09,1,-2.6949031894929e-09,-0.99993425607681,7.4369665981067e-09,0.011468937620521)
+local storageStandPosition = Vector3.new(85,18,-42)
+local jumpscareWords = {"soul collector","soul fragment","fragment","red cloth","red fabric","kain merah","shard","entity","ghost"}
+local jumpscarePaths = {"workspace.story.activetrolley.jumpscare","workspace.patrol"}
+local defaultTiming = {HoldPadding=0.22,HeldWait=0.35,InstantWait=0.25,KeyPadding=0.12,InputPadding=0.06,FallbackWait=0.2,SuccessCooldown=1.6,FailureCooldown=4,ConfirmDelay=2.5,RetryDelay=1.2}
+local stretcherTiming = {HoldPadding=0.08,HeldWait=0.18,InstantWait=0.12,KeyPadding=0.05,InputPadding=0.04,FallbackWait=0.12,SuccessCooldown=0.25,FailureCooldown=0.75,ConfirmDelay=0.8,RetryDelay=0.3}
+local jumpscareTiming = {HoldPadding=0.06,HeldWait=0.12,InstantWait=0.08,KeyPadding=0.04,InputPadding=0.03,FallbackWait=0.08,SuccessCooldown=0.12,FailureCooldown=0.3,ConfirmDelay=0.35,RetryDelay=0.15}
+local allowedPromptPaths = {"workspace.lift.trolli","workspace.lobby.fronttable.phone","workspace.lobby.mop","workspace.ruangmayat","workspace.ruangmandi","workspace.ruangdokter","workspace.ruangkremasi","workspace.ruangelektrikal","workspace.ruangpenyiapan","workspace.ruangpenyimpanan","workspace.ruangpasien","workspace.stain","workspace.story"}
+local blockedPromptPaths = {"workspace.pintu","workspace.lift.tombollift","workspace.lobby.fronttable.tuyol","workspace.ruangpenyimpanan.decor."}
+
+local taskPromptRules = {
+	{words={"refill the soap bar","refill soap bar"},paths={"workspace.story.activetrolley.keranjang.sabun.sabun.proximityprompt"}},
+	{words={"refill the urn to the shelf","refill urn to the shelf","refill urn to shelf"},paths={"workspace.story.activetrolley.keranjang.urn.urnmiddle.proximityprompt"}},
+	{words={"refill the shroud sheet","refill shroud sheet"},paths={"workspace.story.activetrolley.keranjang.part.proximityprompt"}},
+	{words={"take the embalming fluid","take embalming fluid","take fluid"},paths={"workspace.ruangpenyiapan.tools.fluid.proximityprompt"}},
+	{words={"take the soap","take soap","ambil sabun","soap bar"},paths={"workspace.ruangmandi.sabun.sabun.proximityprompt","workspace.ruangpenyimpanan.sabun.sabun.proximityprompt"}},
+	{words={"clean the body with soap","clean the body","wash the body with soap","wash the body","clean body","wash body","bersihkan tubuh","bersihkan jenazah","bersihkan mayat"},paths={"workspace.ruangmandi.tempatmandi.jenazah.proximityprompt","workspace.ruangmandi.tempatmandi2.jenazah.proximityprompt"}},
+	{words={"turn on the water","turn on water","nyalakan air"},paths={"workspace.ruangmandi.tempatmandi.shower.tombol.proximityprompt","workspace.ruangmandi.tempatmandi2.shower.tombol.proximityprompt"}},
+	{words={"turn off the water","turn off water","matikan air"},paths={"workspace.ruangmandi.tempatmandi.shower.tombol.proximityprompt2","workspace.ruangmandi.tempatmandi2.shower.tombol.proximityprompt2"}},
+	{words={"take the shroud sheet","take shroud sheet","ambil kain kafan","take shroud"},paths={"workspace.ruangmandi.kainkafan.kafan.proximityprompt","workspace.ruangpenyimpanan.kainkafan.kafan.proximityprompt"}},
+	{words={"place the shroud sheet","place shroud sheet","taruh kain kafan","pasang kain kafan"},paths={"workspace.ruangmandi.tempatkafan.kafan.proximityprompt","workspace.ruangmandi.tempatkafan.kainkafan.proximityprompt","workspace.ruangmandi.tempatkafan"}},
+	{words={"shroud the body","bungkus jenazah","kafan jenazah"},paths={"workspace.ruangmandi.tempatkafan.jenazah.proximityprompt2","workspace.ruangmandi.tempatkafan.jenazah.proximityprompt"}},
+	{words={"move the body","move body to the stretcher","move body","pindahkan jenazah"},paths={"workspace.ruangpasien","workspace.ruangdokter","workspace.ruangmandi","workspace.ruangkremasi","workspace.ruangpenyiapan","workspace.story.activetrolley"}},
+	{words={"pick up the phone","pick up phone","answer the phone","answer phone","go to lobby and make a call","make a call","call nurse"},paths={"workspace.lobby.fronttable.phone.base.proximityprompt","workspace.lobby.fronttable.phone.base.proximityprompt2"}},
+	{words={"take the cremation urn","take cremation urn"},paths={"workspace.ruangkremasi.urn.proximityprompt"}},
+	{words={"take the urn","take urn"},paths={"workspace.ruangpenyimpanan.urn.proximityprompt"}},
+	{words={"pick up the stretcher","pick up stretcher"},paths={"workspace.story.activetrolley.part.proximityprompt"}},
+	{words={"return the stretcher","return stretcher","put stretcher to the lift"},paths={"workspace.lift.trolli.proximityprompt"}}
+}
+local destinationRules = {
+	{words={"go to the storage room","go to storage room"},paths={"workspace.ruangpenyimpanan.trolli"}},
+	{words={"go to the sterilization area","go to sterilization area","go to the sterilization room","go to sterilization room"},paths={"workspace.ruangmandi.trolli"}},
+	{words={"go to the morgue room","go to morgue room"},paths={"workspace.ruangmayat.trolli"}},
+	{words={"go back to the embalming room","go back to embalming room","go to the embalming room","go to embalming room"},paths={"workspace.ruangpenyiapan.trolli"}},
+	{words={"go to the autopsy room","go to autopsy room"},paths={"workspace.ruangdokter.trolli"}},
+	{words={"go to the cremation room","go to cremation room"},paths={"workspace.ruangkremasi.trolli"}},
+	{words={"go to the mourning room","go to mourning room"},paths={"workspace.ruangduka.trolli"}},
+	{words={"put stretcher to the lift","return the stretcher","return stretcher"},paths={"workspace.lift.trolli.proximityprompt"}}
+}
+local areaRules = {
+	{words={"phone","telepon","call","answer"},paths={"lobby.fronttable.phone"}},
+	{words={"electric","power","wire","listrik"},paths={"ruangelektrikal"}},
+	{words={"cremat","bone","ash","urn","grind","kremasi"},paths={"ruangkremasi","ruangpenyimpanan.urn"}},
+	{words={"autopsy","report","forensic","dokter","otopsi"},paths={"ruangdokter"}},
+	{words={"wash","soap","steril","mandi","clean the body","clean body"},paths={"ruangmandi","ruangpenyimpanan.sabun"}},
+	{words={"storage room","storage area","penyimpanan"},paths={"workspace.ruangpenyimpanan.trolli"}},
+	{words={"shroud","kafan"},paths={"ruangmandi.kainkafan","ruangpenyimpanan.kainkafan"}},
+	{words={"jarik"},paths={"ruangpenyimpanan.kainjarik"}},
+	{words={"embalm","needle","eyecap","scalpel","tube","fluid","trocar","coffin","penyiapan"},paths={"ruangpenyiapan","ruangpenyimpanan"}},
+	{words={"freezer","morgue","cold","slot","mayat","jenazah"},paths={"ruangmayat"}},
+	{words={"patient","ward","retrieve","fetch","pasien"},paths={"ruangpasien"}},
+	{words={"stretcher","trolley","return","trolli"},paths={"workspace.story.activetrolley","workspace.lift.trolli"}},
+	{words={"clean the area","clean area","floor","stain","mop","bersihkan lantai"},paths={"workspace.stain","workspace.lobby.mop"}}
+}
+
+local function lowerText(v) return string.lower(tostring(v or "")) end
+local function containsAny(t, needles) t=lowerText(t); for _,n in ipairs(needles) do if string.find(t,n,1,true) then return true end end; return false end
+local function cleanText(v, fb) local x=tostring(v or ""):gsub("%s+"," "):match("^%s*(.-)%s*$"); return x and x~="" and x or fb or "-" end
+local function isGuiVisible(gui)
+	if not (gui and gui:IsA("GuiObject") and gui.Visible and gui:IsDescendantOf(playerGui)) then return false end
+	local p = gui.Parent
+	while p and p ~= playerGui do
+		if p:IsA("GuiObject") and not p.Visible then return false end
+		if p:IsA("LayerCollector") and not p.Enabled then return false end
+		p = p.Parent
+	end
+	return true
+end
+local function clickGuiButton(b)
+	if not (b and b:IsA("GuiButton") and isGuiVisible(b)) then return false end
+	local c = b.AbsolutePosition + b.AbsoluteSize/2
+	return pcall(function()
+		VirtualInputManager:SendMouseButtonEvent(c.X,c.Y,0,true,game,0); task.wait(0.035)
+		VirtualInputManager:SendMouseButtonEvent(c.X,c.Y,0,false,game,0)
+	end)
+end
+local function pressButton(b)
+	if not (b and b:IsA("GuiButton") and isGuiVisible(b)) then return false end
+	if type(firesignal)=="function" then
+		if pcall(firesignal,b.MouseButton1Click) then return true end
+		if pcall(firesignal,b.Activated) then return true end
+	end
+	return clickGuiButton(b)
+end
+local function getCharacter()
+	local char = localPlayer.Character
+	local hum = char and char:FindFirstChildOfClass("Humanoid")
+	local root = char and char:FindFirstChild("HumanoidRootPart")
+	if hum and root and hum.Health>0 and char.Parent then
+		if hum:GetStateEnabled(Enum.HumanoidStateType.Seated) then hum:SetStateEnabled(Enum.HumanoidStateType.Seated,false) end
+		if hum.Sit then hum.Sit=false; hum:ChangeState(Enum.HumanoidStateType.Running) end
+		return char,hum,root
+	end
+	return nil,nil,nil
+end
+local function cancelMovement()
+	local _,hum,root = getCharacter()
+	if hum and root then hum:MoveTo(root.Position); pcall(function() root.AssemblyLinearVelocity=Vector3.zero; root.AssemblyAngularVelocity=Vector3.zero end) end
+end
+local function setStatus(msg,ex)
+	ex=ex or {}; State.Status.Message=cleanText(msg,"Active")
+	if ex.Phase then State.Status.Phase=ex.Phase end
+	State.Status.UpdatedAt=os.clock(); State.LastHeartbeatAt=os.clock()
+end
+local function saveConfig()
+	if type(writefile)~="function" then return end
+	local d={AutoFarm=State.AutoFarm,AutoStartSolo=State.AutoStartSolo,AutoMinigame=State.AutoMinigame,Noclip=State.Noclip,TweenMode=State.TweenMode,ShiftsCompleted=State.Stats.ShiftsCompleted,MinigamesSolved=State.Stats.MinigamesSolved}
+	pcall(writefile,State.ConfigPath,HttpService:JSONEncode(d))
+end
+local function loadConfig()
+	if type(readfile)~="function" or type(isfile)~="function" then return end
+	local ok,ex=pcall(isfile,State.ConfigPath)
+	if ok and ex then
+		local ok2,c=pcall(readfile,State.ConfigPath)
+		if ok2 and type(c)=="string" and c~="" then
+			local ok3,s=pcall(HttpService.JSONDecode,HttpService,c)
+			if ok3 and type(s)=="table" then
+				if type(s.AutoFarm)=="boolean" then State.AutoFarm=s.AutoFarm end
+				if type(s.AutoStartSolo)=="boolean" then State.AutoStartSolo=s.AutoStartSolo end
+				if type(s.AutoMinigame)=="boolean" then State.AutoMinigame=s.AutoMinigame end
+				if type(s.Noclip)=="boolean" then State.Noclip=s.Noclip end
+				if type(s.TweenMode)=="boolean" then State.TweenMode=s.TweenMode end
+				if type(s.ShiftsCompleted)=="number" then State.Stats.ShiftsCompleted=s.ShiftsCompleted end
+				if type(s.MinigamesSolved)=="number" then State.Stats.MinigamesSolved=s.MinigamesSolved end
+			end
+		end
+	end
+end
+local function queueReexecOnTeleport()
+	local q = getgenv and getgenv().queue_on_teleport or syn and syn.queue_on_teleport or queue_on_teleport
+	if type(q)=="function" then pcall(q,[[task.spawn(function() repeat task.wait(0.5) until game:IsLoaded() and game.Players.LocalPlayer local p={"MorgueMini.lua"} if type(readfile)=="function" and type(isfile)=="function" then for _,x in ipairs(p) do if isfile(x) then loadstring(readfile(x))() break end end end end)]]) end
+end
+local function releasePromptHold()
+	local ap,ak,ph,pr,par,paa = State.ActivePrompt,State.ActivePromptKey,State.PromptHoldHumanoid,State.PromptHoldRoot,State.PromptOriginalAutoRotate,State.PromptOriginalAnchored
+	if ap and ap.Parent then pcall(function() ap:InputHoldEnd() end) end
+	if ak and ak~=Enum.KeyCode.Unknown then pcall(function() VirtualInputManager:SendKeyEvent(false,ak,false,game) end) end
+	pcall(function() VirtualInputManager:SendKeyEvent(false,Enum.KeyCode.E,false,game) end)
+	if not (ph and ph.Parent and pr and pr.Parent) then local _,h,r=getCharacter(); ph=h; pr=r end
+	if pr and pr.Parent then pcall(function()
+		if paa~=nil then pr.Anchored=paa end
+		pr.AssemblyLinearVelocity=Vector3.zero; pr.AssemblyAngularVelocity=Vector3.zero
+	end) end
+	if ph and ph.Parent then ph.AutoRotate = par~=nil and par or true end
+	State.ActivePrompt=nil; State.ActivePromptKey=nil; State.PromptHoldHumanoid=nil; State.PromptHoldRoot=nil
+	State.PromptOriginalAutoRotate=nil; State.PromptOriginalAnchored=nil; State.PromptBusy=false
+end
+local function applyNoclipOnce(char)
+	if not State.Noclip or not char then return end
+	for _,d in ipairs(char:GetDescendants()) do if d:IsA("BasePart") and d.CanCollide then d.CanCollide=false end end
+end
+local function startNoclipLoop()
+	table.insert(State.Connections,RunService.Heartbeat:Connect(function()
+		if not State.Noclip or State.Unloaded then return end
+		local char = localPlayer.Character; if char then applyNoclipOnce(char) end
+	end))
+end
+local function walkToPosition(targetPos,timeout,tolerance)
+	local char,hum,root = getCharacter(); if not (char and hum and root) then return false end
+	timeout=timeout or State.WalkTimeout; tolerance=tolerance or 4
+	pcall(function() if root.Anchored then root.Anchored=false end end)
+	if (root.Position-targetPos).Magnitude<=tolerance then return true end
+	hum:MoveTo(targetPos)
+	local st=os.clock(); local lastPos=root.Position; local stuckT=0; local direct=false
+	while os.clock()-st<timeout do
+		if State.Unloaded then break end
+		local c,h,r=getCharacter(); if not (c and h and r) then break end
+		if h.Health<=0 then break end
+		if r.Anchored then pcall(function() r.Anchored=false end) end
+		if (r.Position-targetPos).Magnitude<=tolerance then h:Move(Vector3.zero); return true end
+		if (r.Position-lastPos).Magnitude<0.3 then
+			stuckT+=0.1
+			if stuckT>1 then if not direct then direct=true else h.Jump=true end; stuckT=0 end
+		else stuckT=0 end
+		lastPos=r.Position
+		if direct then local d=targetPos-r.Position; if d.Magnitude>0.1 then h:Move(d.Unit) end
+		else h:MoveTo(targetPos) end
+		if State.Noclip then applyNoclipOnce(c) end
+		task.wait(0.1)
+	end
+	local _,h2=getCharacter(); if h2 then h2:Move(Vector3.zero) end
+	return false
+end
+local function tweenToPosition(targetPos,timeout,tolerance)
+	local char,hum,root = getCharacter(); if not (char and hum and root) then return false end
+	timeout=timeout or State.WalkTimeout; tolerance=tolerance or 4
+	if (root.Position-targetPos).Magnitude<=tolerance then return true end
+	local sp=root.Position; local baseCF=root.CFrame
+	local dist=(sp-targetPos).Magnitude; local dur=math.min(dist/(State.TweenSpeed or 18),timeout); local st=os.clock()
+	while os.clock()-st<dur do
+		if State.Unloaded then break end
+		local c,h,r=getCharacter(); if not (c and h and r) then break end
+		if h.Health<=0 then break end
+		local t=math.min((os.clock()-st)/dur,1)
+		local np=sp:Lerp(targetPos,t)
+		pcall(function() r.AssemblyLinearVelocity=Vector3.zero; r.AssemblyAngularVelocity=Vector3.zero; r.CFrame=CFrame.new(np)*(baseCF-baseCF.Position) end)
+		if State.Noclip then applyNoclipOnce(c) end
+		task.wait(0.03)
+	end
+	local _,_,r2=getCharacter(); if r2 then pcall(function() r2.CFrame=CFrame.new(targetPos)*(baseCF-baseCF.Position) end) end
+	return true
+end
+local function moveToPosition(targetPos,timeout,tolerance) if State.TweenMode then return tweenToPosition(targetPos,timeout,tolerance) end return walkToPosition(targetPos,timeout,tolerance) end
+local function getPromptPart(prompt)
+	local p = prompt and prompt.Parent
+	while p and p~=workspace do
+		if p:IsA("BasePart") then return p end
+		if p:IsA("Model") then local pp=p.PrimaryPart or p:FindFirstChildWhichIsA("BasePart",true); if pp then return pp end end
+		p=p.Parent
+	end
+end
+local function getPromptPosition(prompt,part)
+	local p = prompt and prompt.Parent
+	if p and p:IsA("Attachment") then return p.WorldPosition end
+	return part and part.Position
+end
+local function getFullName(inst)
+	if not (inst and inst.Parent) then return "-" end
+	local ok,n = pcall(function() return inst:GetFullName() end)
+	return ok and cleanText(n,"-") or "-"
+end
+local function getPromptStandCFrame(prompt) if lowerText(getFullName(prompt))=="workspace.ruangpenyiapan.tools.fluid.proximityprompt" then return fluidStandCFrame end return nil end
+local function isInActiveTrolley(inst) local s=workspace:FindFirstChild("Story"); local at=s and s:FindFirstChild("ActiveTrolley"); return at~=nil and inst~=nil and inst:IsDescendantOf(at) end
+local function isJumpscarePrompt(prompt)
+	if not (prompt and prompt.Parent) then return false end
+	local path=lowerText(prompt:GetFullName()); local patrol=workspace:FindFirstChild("Patrol")
+	if patrol and prompt:IsDescendantOf(patrol) then return true end
+	local pText=lowerText(prompt.ActionText.." "..prompt.ObjectText)
+	if containsAny(pText,jumpscareWords) then return true end
+	return isInActiveTrolley(prompt) and containsAny(path,jumpscarePaths)
+end
+local function moveToNearPrompt(prompt,part)
+	local pPos=getPromptPosition(prompt,part); if not pPos then return false end
+	local pPath=lowerText(getFullName(prompt)); local standCF=getPromptStandCFrame(prompt)
+	if standCF then return moveToPosition(standCF.Position,State.WalkTimeout,2.5) end
+	local char,hum,root=getCharacter(); if not (char and hum and root) then return false end
+	local lookDir=Vector3.new(part.CFrame.LookVector.X,0,part.CFrame.LookVector.Z); if lookDir.Magnitude<0.05 then lookDir=Vector3.new(0,0,1) end
+	local isStorage=containsAny(pPath,{"workspace.ruangpenyimpanan.urn.proximityprompt","workspace.ruangpenyimpanan.sabun.sabun.proximityprompt"})
+	local isCremUrn=pPath=="workspace.ruangkremasi.urn.proximityprompt"
+	if isStorage then return moveToPosition(storageStandPosition,State.WalkTimeout,2.5) end
+	local fwd=2.5; if isCremUrn then fwd=4 end
+	local target=pPos+lookDir.Unit*fwd
+	if pPath=="workspace.story.activetrolley.part.proximityprompt" then target=pPos-lookDir.Unit*2.5 end
+	local rp=RaycastParams.new(); rp.FilterType=Enum.RaycastFilterType.Exclude; rp.FilterDescendantsInstances={char,part}; rp.IgnoreWater=true
+	local gh=workspace:Raycast(Vector3.new(target.X,pPos.Y+5,target.Z),Vector3.new(0,-15,0),rp)
+	if gh and gh.Instance.CanCollide and gh.Normal.Y>0.5 then target=Vector3.new(target.X,gh.Position.Y+hum.HipHeight+root.Size.Y*0.5,target.Z) end
+	if moveToPosition(target,State.WalkTimeout,3) then
+		local _,_,r2=getCharacter()
+		if r2 and (r2.Position-pPos).Magnitude<=prompt.MaxActivationDistance+1 then return true end
+	end
+	local taskText=lowerText(getTaskText())
+	if containsAny(taskText,{"place","taruh","pasang","letakkan"}) then
+		for _,ang in ipairs({0,90,-90,180,45,-45,135,-135}) do
+			if State.Unloaded then return false end
+			local rad=math.rad(ang); local od=Vector3.new(math.cos(rad),0,math.sin(rad)); local alt=pPos+od*4
+			local gh2=workspace:Raycast(Vector3.new(alt.X,pPos.Y+5,alt.Z),Vector3.new(0,-15,0),rp)
+			if gh2 and gh2.Instance.CanCollide and gh2.Normal.Y>0.5 then alt=Vector3.new(alt.X,gh2.Position.Y+hum.HipHeight+root.Size.Y*0.5,alt.Z) end
+			if moveToPosition(alt,8,2.5) then
+				local _,_,r3=getCharacter()
+				if r3 and (r3.Position-pPos).Magnitude<=prompt.MaxActivationDistance+1 then return true end
+			end
+		end
+	end
+	return false
+end
+local function moveToBesidePrompt(prompt,part)
+	local pPos=getPromptPosition(prompt,part); if not pPos then return false end
+	return moveToPosition(Vector3.new(pPos.X+3,pPos.Y,pPos.Z),State.WalkTimeout,3)
+end
+local function moveForTask(taskText,prompt,part)
+	local pPath=prompt and prompt.Parent and lowerText(prompt:GetFullName()) or ""
+	local isR101=containsAny(taskText,{"room 101","rooms 101"}) and string.find(pPath,"workspace.ruangpasien.101.trolli.proximityprompt",1,true)~=nil
+	if not isR101 then return moveToNearPrompt(prompt,part) end
+	return moveToPosition(room101StandCFrame.Position,State.WalkTimeout,3)
+end
+local function getTimingProfile(prompt)
+	local pText=prompt and lowerText(prompt.ActionText.." "..prompt.ObjectText) or ""
+	local pPath=prompt and prompt.Parent and lowerText(prompt:GetFullName()) or ""
+	local isTrolley=containsAny(pPath,{"workspace.story.activetrolley"}) and containsAny(pText,{"push","grab","hold","release","move body"})
+	if containsAny(pPath,jumpscarePaths) or containsAny(pText,jumpscareWords) then return jumpscareTiming end
+	if isTrolley or containsAny(pText,{"place stretcher","place trolley","move stretcher"}) then return stretcherTiming end
+	return defaultTiming
+end
+local function findTrolleyPrompt(words,inc)
+	local s=workspace:FindFirstChild("Story"); local at=s and s:FindFirstChild("ActiveTrolley")
+	local part=at and at:FindFirstChild("Part"); local pp=part and part:FindFirstChildOfClass("ProximityPrompt")
+	if pp and (inc or pp.Enabled) and containsAny(pp.ActionText.." "..pp.ObjectText,words) then return pp end
+	if at then for _,d in ipairs(at:GetDescendants()) do
+		if d:IsA("ProximityPrompt") and (inc or d.Enabled) and containsAny(d.ActionText.." "..d.ObjectText,words) then return d end
+	end end
+	return nil
+end
+local function detectTrolleyCarryState()
+	if findTrolleyPrompt({"release"},true) then State.TrolleyCarryState=true; return true end
+	if findTrolleyPrompt({"push","grab","hold"},true) then State.TrolleyCarryState=false; return false end
+	if State.TrolleyCarryState~=nil then return State.TrolleyCarryState end
+	return false
+end
+local function isCarryingTrolley() return detectTrolleyCarryState()==true end
+local function getTaskUi() return playerGui and playerGui:FindFirstChild("TaskUi") end
+local function getMinigamesGui() return playerGui and playerGui:FindFirstChild("Minigames") end
+local function getTaskText()
+	local tu=getTaskUi(); local tf=tu and tu:FindFirstChild("Task")
+	if not tf then return "" end
+	local tl=tf:FindFirstChild("Task")
+	if tl and tl:IsA("TextLabel") and tl.Text~="" and tl.Text~="Task" then return tl.Text:gsub("%s+"," "):match("^%s*(.-)%s*$") or "" end
+	local ol=tf:FindFirstChild("ObjectiveLabel")
+	if ol and ol:IsA("TextLabel") and ol.Text~="" and ol.Text~="Task" then return ol.Text:gsub("%s+"," "):match("^%s*(.-)%s*$") or "" end
+	return ""
+end
+local function isShiftCompleted() return containsAny(getTaskText(),{"shift completed"}) end
+local function isReturnStretcherTask(t) return containsAny(t,{"put stretcher to the lift","return the stretcher","return stretcher"}) end
+local function isDestinationTask(t) t=lowerText(t); if containsAny(t,{"pick up","take stretcher","take the stretcher"}) then return false end; return string.find(t,"go to ",1,true)~=nil or string.find(t,"go back to ",1,true)~=nil or isReturnStretcherTask(t) end
+local function isPromptHandled(prompt,taskText) local h=State.HandledEventPrompts[prompt]; return h==true or h~=nil and h==lowerText(taskText) end
+local function promptRuleMatch(prompt,taskText,rule)
+	local pPath=lowerText(prompt:GetFullName())
+	if containsAny(pPath,rule.paths) then return true end
+	if containsAny(taskText,{"place","taruh","pasang","letakkan"}) then
+		local pAct=lowerText(prompt.ActionText.." "..prompt.ObjectText)
+		if containsAny(pAct,{"place","taruh","pasang","letakkan"}) then
+			if containsAny(taskText,{"shroud","kafan","sheet","kain"}) and containsAny(pAct,{"shroud","kafan","sheet","kain"}) then return true end
+			if containsAny(taskText,{"urn"}) and containsAny(pAct,{"urn"}) then return true end
+			if containsAny(taskText,{"soap","sabun"}) and containsAny(pAct,{"soap","sabun"}) then return true end
+		end
+	end
+	return false
+end
+local function promptMatchesTask(prompt,taskText,skipCarry)
+	if not (prompt and prompt.Parent) then return false end
+	local pPath=lowerText(prompt:GetFullName()); taskText=lowerText(taskText)
+	if taskText=="" or containsAny(pPath,blockedPromptPaths) then return false end
+	if isDestinationTask(taskText) and not containsAny(taskText,{"make a call","lobby"}) then
+		local at=lowerText(prompt.ActionText.." "..prompt.ObjectText)
+		if not containsAny(at,{"place stretcher","place trolley"}) then return false end
+		if not skipCarry and not isCarryingTrolley() then return false end
+		local rn=taskText:match("go to rooms?%s+(%d+)")
+		if rn then return string.find(pPath,"workspace.ruangpasien."..rn..".trolli.proximityprompt",1,true)~=nil end
+		for _,r in ipairs(destinationRules) do if containsAny(taskText,r.words) then return containsAny(pPath,r.paths) end end
+		for _,r in ipairs(areaRules) do if containsAny(taskText,r.words) and containsAny(pPath,r.paths) then return true end end
+		return false
+	end
+	local pText=lowerText(prompt.ActionText.." "..prompt.ObjectText)
+	if containsAny(taskText,{"move body","move the body","place body","place the body"}) then
+		return containsAny(pText,{"move body","move the body","move body to the strecther","move body to the stretcher"})
+	end
+	for _,r in ipairs(taskPromptRules) do if containsAny(taskText,r.words) then return promptRuleMatch(prompt,taskText,r) end end
+	for _,r in ipairs(areaRules) do if containsAny(taskText,r.words) and containsAny(pPath,r.paths) then return true end end
+	return false
+end
+local function isAllowedPrompt(prompt)
+	local path=lowerText(prompt:GetFullName())
+	if containsAny(path,blockedPromptPaths) then return false end
+	for _,ap in ipairs(allowedPromptPaths) do if string.find(path,ap,1,true) then return true end end
+	return false
+end
+local function triggerPrompt(prompt,useHold,skipFacing)
+	local _,hum,root=getCharacter()
+	local pPart=getPromptPart(prompt); local pPos=getPromptPosition(prompt,pPart)
+	local timing=getTimingProfile(prompt); local pPath=lowerText(getFullName(prompt))
+	local isCremUrn=useHold and pPath=="workspace.ruangkremasi.urn.proximityprompt"
+	if State.PromptBusy or not (hum and root and pPart and pPos and prompt.Enabled) then return false end
+	if math.max(prompt.MaxActivationDistance+1,4)<(root.Position-pPos).Magnitude then return false end
+	State.PromptBusy=true
+	local autoRot,anch=hum.AutoRotate,root.Anchored
+	State.ActivePrompt=prompt; State.ActivePromptKey=nil
+	State.PromptHoldHumanoid=hum; State.PromptHoldRoot=root
+	State.PromptOriginalAutoRotate=autoRot; State.PromptOriginalAnchored=anch
+	hum.AutoRotate=false; hum:MoveTo(root.Position)
+	if prompt.HoldDuration>0 then pcall(function()
+		root.AssemblyLinearVelocity=Vector3.zero; root.AssemblyAngularVelocity=Vector3.zero; root.Anchored=true
+	end) end
+	local lookT=Vector3.new(pPos.X,root.Position.Y,pPos.Z)
+	if not skipFacing and (lookT-root.Position).Magnitude>0.05 then
+		pcall(function() TweenService:Create(root,TweenInfo.new(0.18,Enum.EasingStyle.Quad,Enum.EasingDirection.Out),{CFrame=CFrame.lookAt(root.Position,lookT)}):Play() end)
+	end
+	RunService.RenderStepped:Wait()
+	local triggered=false; local conn
+	pcall(function() conn=prompt.Triggered:Connect(function(p) if not p or p==localPlayer then triggered=true end end) end)
+	local function wt(s) local dl=os.clock()+s; while not triggered and State.AutoFarm and State.ActivePrompt==prompt and prompt.Parent and os.clock()<dl do RunService.Heartbeat:Wait() end end
+	local function wa(s) local dl=os.clock()+s; while State.AutoFarm and State.ActivePrompt==prompt and prompt.Parent and os.clock()<dl do RunService.Heartbeat:Wait() end return State.AutoFarm and State.ActivePrompt==prompt and prompt.Parent~=nil end
+	if type(fireproximityprompt)=="function" then
+		pcall(function() prompt.HoldDuration=0 end)
+		pcall(fireproximityprompt,prompt,0); pcall(fireproximityprompt,prompt); wt(timing.InstantWait)
+	end
+	if not triggered then
+		if isCremUrn then pcall(function()
+			prompt:InputHoldBegin()
+			if wa(math.max(prompt.HoldDuration,0)+timing.HoldPadding) then prompt:InputHoldEnd(); wt(timing.HeldWait); return end
+			prompt:InputHoldEnd()
+		end) elseif prompt.KeyboardKeyCode~=Enum.KeyCode.Unknown then
+			State.ActivePromptKey=prompt.KeyboardKeyCode
+			pcall(function() VirtualInputManager:SendKeyEvent(true,prompt.KeyboardKeyCode,false,game) end)
+			local sa=wa(math.max(prompt.HoldDuration,0)+(useHold and timing.HoldPadding or timing.KeyPadding))
+			pcall(function() VirtualInputManager:SendKeyEvent(false,prompt.KeyboardKeyCode,false,game) end)
+			State.ActivePromptKey=nil
+			if sa then wt(useHold and timing.HeldWait or timing.FallbackWait) end
+		end
+		if not triggered then pcall(function()
+			prompt:InputHoldBegin()
+			if wa(math.max(prompt.HoldDuration,0)+timing.InputPadding) then prompt:InputHoldEnd(); wt(timing.FallbackWait); return end
+			prompt:InputHoldEnd()
+		end) end
+		if not triggered and type(fireproximityprompt)=="function" then pcall(fireproximityprompt,prompt); wt(timing.FallbackWait) end
+	end
+	local cancelled=not State.AutoFarm or State.ActivePrompt~=prompt
+	if conn then pcall(function() conn:Disconnect() end) end
+	releasePromptHold()
+	if cancelled then return false end
+	State.Cooldowns[prompt]=os.clock()+(triggered and timing.SuccessCooldown or timing.FailureCooldown)
+	State.ForcePromptReposition[prompt]=true
+	return triggered
+end
+local function scorePrompt(prompt,taskText,root)
+	if prompt.Parent and prompt.Enabled and not prompt:IsDescendantOf(localPlayer.Character or game) then
+		if isPromptHandled(prompt,taskText) then return nil end
+		local pPart=getPromptPart(prompt); if not pPart then return nil end
+		local pPath=lowerText(prompt:GetFullName())
+		local score=100-(root.Position-pPart.Position).Magnitude*0.12
+		for _,r in ipairs(taskPromptRules) do
+			if containsAny(taskText,r.words) then
+				if not promptRuleMatch(prompt,taskText,r) then return nil end
+				score+=10000; break
+			end
+		end
+		if isDestinationTask(taskText) and not containsAny(taskText,{"make a call","lobby"}) then return nil end
+		local isNew=State.InitialPrompts[prompt]==false
+		if isNew and State.UrgentEventPrompt~=prompt and not isJumpscarePrompt(prompt) and not promptMatchesTask(prompt,taskText) then return nil end
+		if State.UrgentEventPrompt==prompt or isJumpscarePrompt(prompt) then score+=100000
+		elseif not isAllowedPrompt(prompt) then return nil end
+		for _,r in ipairs(areaRules) do if containsAny(taskText,r.words) and containsAny(pPath,r.paths) then score+=4000 end end
+		if containsAny(prompt.ActionText.." "..prompt.ObjectText,jumpscareWords) then score+=20000 end
+		if containsAny(taskText,{"room","slot","freezer","kulkas","patient","pasien"}) then
+			for d in taskText:gmatch("%d+") do if string.find(pPath,"."..d..".",1,true) then score+=7000 end end
+		end
+		if State.Cooldowns[prompt] and os.clock()<State.Cooldowns[prompt] then score-=15000 end
+		return score,pPart
+	end
+	return nil
+end
+local function pickBestPrompt()
+	local _,_,root=getCharacter(); if not root then return nil end
+	local taskText=lowerText(getTaskText()); local bp,bpart,bs
+	for i=#State.Prompts,1,-1 do
+		local p=State.Prompts[i]
+		if not p.Parent then State.PromptKnown[p]=nil; table.remove(State.Prompts,i)
+		else
+			local s,part=scorePrompt(p,taskText,root)
+			if s and (not bs or bs<s) then bp=p; bpart=part; bs=s end
+		end
+	end
+	return bp,bpart
+end
+local function registerPrompt(prompt,isInit)
+	if not prompt:IsA("ProximityPrompt") or State.PromptKnown[prompt] then return end
+	State.PromptKnown[prompt]=true; State.InitialPrompts[prompt]=isInit==true
+	table.insert(State.Prompts,prompt)
+end
+local function handleStandardPrompt()
+	local taskText=lowerText(getTaskText())
+	if isDestinationTask(taskText) and not containsAny(taskText,{"make a call","lobby"}) then return false end
+	local prompt,part=pickBestPrompt(); if not (prompt and part) then return false end
+	local _,_,root=getCharacter(); local pPos=getPromptPosition(prompt,part)
+	local inRange=root and pPos and (root.Position-pPos).Magnitude<=prompt.MaxActivationDistance
+	local needsRepo=State.ForcePromptReposition[prompt]==true
+	local standCF=getPromptStandCFrame(prompt)
+	if inRange and not needsRepo and not standCF then triggerPrompt(prompt)
+	else
+		if moveToNearPrompt(prompt,part) then
+			local _,_,r2=getCharacter()
+			if r2 and pPos and (r2.Position-pPos).Magnitude<=prompt.MaxActivationDistance+1 then triggerPrompt(prompt)
+			else State.Cooldowns[prompt]=os.clock()+0.8 end
+		else State.Cooldowns[prompt]=os.clock()+0.8 end
+	end
+	return true
+end
+local function solveWireMinigame(mg)
+	local colors={"Red","Blue","Green","Yellow"}
+	local function pair(c) local l=mg:FindFirstChild("Left"); local r=mg:FindFirstChild("Right"); return l and l:FindFirstChild(c), r and r:FindFirstChild(c) end
+	local function isConn(c) local lw,rw=pair(c); return lw and rw and lw:IsA("GuiButton") and rw:IsA("GuiButton") and not lw.Active and not rw.Active end
+	for _,c in ipairs(colors) do
+		if not (State.AutoFarm and State.AutoMinigame and isGuiVisible(mg)) then break end
+		if not isConn(c) then
+			local lw,rw=pair(c)
+			if lw and rw and lw.Active and rw.Active then pressButton(lw); task.wait(0.08); pressButton(rw); task.wait(0.15) end
+		end
+	end
+	task.wait(0.4)
+	if isGuiVisible(mg) then
+		local gp=ReplicatedStorage:FindFirstChild("Gameplay"); local mh=gp and gp:FindFirstChild("MinigamesHandler")
+		if mh and mh:IsA("RemoteEvent") then mg.Visible=false; pcall(function() mh:FireServer("Wire","Finished") end) end
+	end
+	return not isGuiVisible(mg)
+end
+local function solveCheckMinigame(mg)
+	for _=1,30 do
+		if not (State.AutoFarm and State.AutoMinigame and isGuiVisible(mg)) then break end
+		local btn; local ch=mg:FindFirstChild("Check")
+		if ch then for _,c in ipairs(ch:GetChildren()) do if c:IsA("ImageButton") and c.Visible then btn=c; break end end end
+		if btn then pressButton(btn); task.wait(0.18) else task.wait(0.05) end
+	end
+end
+local function solveTimingMinigame(mg)
+	for _=1,800 do
+		if not (State.AutoFarm and State.AutoMinigame and isGuiVisible(mg)) then break end
+		local bar=mg:FindFirstChild("Bar"); local ind=bar and bar:FindFirstChild("Indicator")
+		local tz=bar and bar:FindFirstChild("TargetZone"); local mod=mg:FindFirstChild("Modal")
+		if not (ind and tz and mod) then break end
+		local ic=ind.AbsolutePosition.X+ind.AbsoluteSize.X/2
+		local zl=tz.AbsolutePosition.X; local zr=tz.AbsolutePosition.X+tz.AbsoluteSize.X
+		if zl<=ic and ic<=zr then clickGuiButton(mod); task.wait(0.1) else RunService.RenderStepped:Wait() end
+	end
+end
+local function solveSlideMinigame(mg)
+	local bar=mg:FindFirstChild("Bar"); if not bar then return end
+	local by=bar.AbsolutePosition.Y+bar.AbsoluteSize.Y/2
+	local bl=bar.AbsolutePosition.X+2; local br=bar.AbsolutePosition.X+bar.AbsoluteSize.X-2
+	for s=0,45 do
+		if not (State.AutoFarm and State.AutoMinigame and isGuiVisible(mg)) then break end
+		VirtualInputManager:SendMouseMoveEvent(bl+(br-bl)*s/45,by,game); RunService.RenderStepped:Wait()
+	end
+end
+local function solveScrubMinigame(mg)
+	local lx=mg.AbsolutePosition.X+mg.AbsoluteSize.X*0.28
+	local rx=mg.AbsolutePosition.X+mg.AbsoluteSize.X*0.72
+	local ty=mg.AbsolutePosition.Y+mg.AbsoluteSize.Y*0.42
+	local by=mg.AbsolutePosition.Y+mg.AbsoluteSize.Y*0.58
+	VirtualInputManager:SendMouseButtonEvent(lx,ty,0,true,game,0)
+	for s=1,240 do
+		if not (State.AutoFarm and State.AutoMinigame and isGuiVisible(mg)) then break end
+		VirtualInputManager:SendMouseMoveEvent(s%2==0 and lx or rx,s%4<2 and ty or by,game); RunService.RenderStepped:Wait()
+	end
+	VirtualInputManager:SendMouseButtonEvent(rx,by,0,false,game,0)
+end
+local function handleMinigame()
+	if State.MinigameBusy or not State.AutoMinigame then return false end
+	local mgGui=getMinigamesGui(); if not mgGui then return false end
+	local solvers={
+		Electrical={remote="Wire",solver=solveWireMinigame},
+		Washing={remote="Washing",solver=solveScrubMinigame},
+		Autopsy={remote="Autopsy",solver=solveCheckMinigame},
+		Injection={remote="TimingGame",solver=solveTimingMinigame},
+		Cutting={remote="Scalpel",solver=solveSlideMinigame},
+		Dressing={remote="Dressing",solver=solveScrubMinigame}
+	}
+	local active,solver
+	for name,info in pairs(solvers) do local c=mgGui:FindFirstChild(name); if c and isGuiVisible(c) then active=c; solver=info; break end end
+	if not active then return false end
+	State.MinigameBusy=true; cancelMovement()
+	setStatus("Solving: "..active.Name,{Phase="minigame"})
+	pcall(solver.solver,active); task.wait(0.2)
+	if isGuiVisible(active) then
+		local gp=ReplicatedStorage:FindFirstChild("Gameplay"); local mh=gp and gp:FindFirstChild("MinigamesHandler")
+		if mh and mh:IsA("RemoteEvent") then pcall(function() mh:FireServer(solver.remote,"Finished") end); active.Visible=false end
+	end
+	State.MinigameBusy=false; State.Stats.MinigamesSolved+=1; saveConfig(); return true
+end
+local function handlePhone()
+	local taskText=lowerText(getTaskText())
+	local phoneTask=containsAny(taskText,{"pick up the phone","pick up phone","answer the phone","answer phone","make a call","answering the call","return to lobby and make a call","call nurse"})
+	local tu=getTaskUi(); local phone=tu and tu:FindFirstChild("Phone")
+	local phoneVis=phone and isGuiVisible(phone)
+	if not phoneTask and not phoneVis then return false end
+	local gp=ReplicatedStorage:FindFirstChild("Gameplay"); local ph=gp and gp:FindFirstChild("PhoneHandler")
+	if ph and ph:IsA("RemoteEvent") then pcall(function() ph:FireServer("Accept") end) end
+	local handled=false
+	if phoneVis then local acc=phone:FindFirstChild("Accept"); if acc then clickGuiButton(acc); handled=true end end
+	local lp=workspace:FindFirstChild("Lobby") and workspace.Lobby:FindFirstChild("FrontTable") and workspace.Lobby.FrontTable:FindFirstChild("Phone")
+	local base=lp and lp:FindFirstChild("Base"); local prompt
+	if base then
+		if base:FindFirstChild("ProximityPrompt2") and base.ProximityPrompt2.Enabled then prompt=base.ProximityPrompt2
+		elseif base:FindFirstChild("ProximityPrompt") and base.ProximityPrompt.Enabled then prompt=base.ProximityPrompt end
+	end
+	if not (prompt and prompt.Enabled) and lp then prompt=lp:FindFirstChildWhichIsA("ProximityPrompt",true) end
+	if prompt and prompt.Enabled then
+		local parent=prompt.Parent; local _,_,root=getCharacter(); local pPos=getPromptPosition(prompt,parent)
+		if root and pPos and (root.Position-pPos).Magnitude<=prompt.MaxActivationDistance then pcall(fireproximityprompt,prompt,0); handled=true
+		elseif moveToNearPrompt(prompt,parent) then pcall(fireproximityprompt,prompt,0); handled=true end
+	end
+	if handled then State.Stats.CallsHandled+=1; setStatus("Phone handled",{Phase="phone"}); return true end
+	return false
+end
+local function handleChoices()
+	local dialogUi=playerGui and playerGui:FindFirstChild("DialogUi")
+	local item=dialogUi and dialogUi:FindFirstChild("Item")
+	if item and isGuiVisible(item) then local close=item:FindFirstChild("Close"); if close and clickGuiButton(close) then task.wait(0.1) end end
+	if os.clock()-State.LastPhoneAt<0.5 then return false end
+	local tu=getTaskUi(); if not tu then return false end
+	local phone=tu:FindFirstChild("Phone")
+	if phone and isGuiVisible(phone) then
+		local gp=ReplicatedStorage:FindFirstChild("Gameplay"); local ph=gp and gp:FindFirstChild("PhoneHandler")
+		if ph and ph:IsA("RemoteEvent") then pcall(function() ph:FireServer("Accept") end) end
+		local acc=phone:FindFirstChild("Accept"); if acc then clickGuiButton(acc) end
+		State.LastPhoneAt=os.clock(); cancelMovement(); State.Stats.CallsHandled+=1; setStatus("Accepted call",{Phase="ui"}); return true
+	end
+	local phone2=tu:FindFirstChild("Phone2")
+	if phone2 and isGuiVisible(phone2) then
+		local gp=ReplicatedStorage:FindFirstChild("Gameplay"); local ph=gp and gp:FindFirstChild("PhoneHandler")
+		if ph and ph:IsA("RemoteEvent") then pcall(function() ph:FireServer("Decline") end) end
+		local dec=phone2:FindFirstChild("Decline"); if dec then clickGuiButton(dec) end
+		State.LastPhoneAt=os.clock(); cancelMovement(); setStatus("Declined call",{Phase="ui"}); return true
+	end
+	local secret=tu:FindFirstChild("Secret")
+	if secret then for _,c in ipairs(secret:GetChildren()) do
+		local dec=c:FindFirstChild("Decline")
+		if dec and isGuiVisible(c) and clickGuiButton(dec) then State.LastPhoneAt=os.clock(); cancelMovement(); setStatus("Declined invite",{Phase="ui"}); return true end
+	end end
+	return false
+end
+local function handleStretcherPickup()
+	local taskText=lowerText(getTaskText())
+	if not containsAny(taskText,{"pick up the stretcher","pick up stretcher","take the stretcher","take stretcher","take and put stretcher","put stretcher to the lift","return the stretcher","return stretcher"}) then return false end
+	local troll=workspace:FindFirstChild("Story") and workspace.Story:FindFirstChild("ActiveTrolley")
+	local part=troll and troll:FindFirstChild("Part"); local pp=part and part:FindFirstChildWhichIsA("ProximityPrompt")
+	if not (pp and pp.Enabled) then pp=troll and troll:FindFirstChildWhichIsA("ProximityPrompt",true); part=pp and pp.Parent end
+	if pp and pp.Enabled and part and pp.ActionText=="Push" then
+		setStatus("Pushing trolley...",{Phase="stretcher"})
+		local _,_,root=getCharacter(); local pPos=getPromptPosition(pp,part)
+		local inR=root and pPos and (root.Position-pPos).Magnitude<=pp.MaxActivationDistance
+		if inR or moveToNearPrompt(pp,part) then triggerPrompt(pp,true) end
+		return true
+	end
+	return false
+end
+local function findDestinationPrompt(obj)
+	if State.TransportDestinationObjective~=obj then State.TransportDestinationObjective=obj; State.TransportDestinationPrompt=nil end
+	local tdp=State.TransportDestinationPrompt
+	if tdp and tdp.Parent and promptMatchesTask(tdp,obj,true) then return tdp end
+	State.TransportDestinationPrompt=nil; local fb
+	for _,p in ipairs(State.Prompts) do
+		if p.Parent and containsAny(p.ActionText.." "..p.ObjectText,{"place stretcher","place trolley"}) and promptMatchesTask(p,obj,true) then
+			if p.Enabled then State.TransportDestinationPrompt=p; return p end
+			fb=fb or p
+		end
+	end
+	State.TransportDestinationPrompt=fb; return fb
+end
+local function handleStretcherTransport()
+	local taskText=lowerText(getTaskText())
+	local isLift=isReturnStretcherTask(taskText); local isDest=isDestinationTask(taskText)
+	local isR101=containsAny(taskText,{"room 101","rooms 101"})
+	if not isR101 then State.Room101AnchorObjective=nil end
+	if not isLift then State.LiftTransportObjective=nil; State.LiftTransportPhase=nil; State.LiftExitCFrame=nil; State.LiftTransportConfirmUntil=0
+	elseif State.LiftTransportObjective~=taskText then State.LiftTransportObjective=taskText; State.LiftTransportPhase=nil; State.LiftExitCFrame=nil; State.LiftTransportConfirmUntil=0 end
+	if not isDest or containsAny(taskText,{"make a call","lobby"}) or State.UrgentEventPrompt then State.TransportDestinationObjective=nil; State.TransportDestinationPrompt=nil; return false end
+	if State.TransportProgressObjective then
+		if State.TransportProgressObjective~=taskText then State.TransportProgressObjective=nil; State.TransportProgressUntil=0
+		elseif os.clock()<State.TransportProgressUntil then return true
+		else State.TransportProgressObjective=nil; State.TransportProgressUntil=0 end
+	end
+	local destP=findDestinationPrompt(taskText); if not destP then return false end
+	local isR101P=isR101 and string.find(lowerText(destP:GetFullName()),"workspace.ruangpasien.101.trolli.proximityprompt",1,true)~=nil
+	local destPart=getPromptPart(destP)
+	if isLift and not destPart then return true end
+	local relP=findTrolleyPrompt({"release"},true); local pushP=findTrolleyPrompt({"push","grab","hold"},true)
+	local carry=detectTrolleyCarryState()
+	if isLift and State.LiftTransportPhase=="waiting_for_auto_drop" then
+		local _,_,root=getCharacter()
+		if carry==false or pushP then
+			if root then
+				local exitCF=State.LiftExitCFrame or root.CFrame*CFrame.new(0,0,26)
+				moveToPosition(exitCF.Position,12,3); State.TrolleyCarryState=false
+				State.LiftTransportPhase="exited_lift"; State.LiftTransportConfirmUntil=os.clock()+3
+				setStatus("Exited lift...",{Phase="transport"})
+			end
+		elseif State.LiftTransportConfirmUntil>0 and os.clock()>=State.LiftTransportConfirmUntil then
+			State.LiftTransportPhase=nil; State.LiftExitCFrame=nil; State.LiftTransportConfirmUntil=0; State.TrolleyCarryState=nil
+		end
+		return true
+	end
+	if isLift and State.LiftTransportPhase=="exited_lift" then
+		if State.LiftTransportConfirmUntil>0 and os.clock()<State.LiftTransportConfirmUntil then return true end
+		State.LiftTransportPhase=nil; State.LiftExitCFrame=nil; State.LiftTransportConfirmUntil=0
+		State.TransportProgressObjective=nil; State.TransportProgressUntil=0; State.TrolleyCarryState=nil
+	end
+	if carry==false and pushP then
+		if State.Cooldowns[pushP] and os.clock()<State.Cooldowns[pushP] then return true end
+		local pushPart=getPromptPart(pushP); if not pushPart then return true end
+		local isMorgue=containsAny(taskText,{"go to the morgue room","go to morgue room","go back to the embalming room","go back to embalming room"})
+		local _,_,root=getCharacter(); local pushPos=getPromptPosition(pushP,pushPart)
+		local inR=root and pushPos and (root.Position-pushPos).Magnitude<=pushP.MaxActivationDistance
+		local reached=isMorgue and (moveToBesidePrompt(pushP,pushPart) or inR) or moveToNearPrompt(pushP,pushPart) or inR
+		if reached and triggerPrompt(pushP,true) then task.wait(0.35); State.TrolleyCarryState=detectTrolleyCarryState()
+		else State.Cooldowns[pushP]=os.clock()+0.4 end
+		return true
+	end
+	if carry~=true then return true end
+	if isLift then
+		local _,_,root=getCharacter(); if not root then return true end
+		if moveToPosition(liftExitCFrame.Position,15,3) then
+			State.LiftExitCFrame=liftExitCFrame*CFrame.new(0,0,26)
+			State.LiftTransportPhase="waiting_for_auto_drop"; State.LiftTransportConfirmUntil=os.clock()+3
+			setStatus("At lift...",{Phase="transport"})
+		end
+		return true
+	end
+	local _,_,root=getCharacter(); if not (destPart and root) then return true end
+	local destPos=getPromptPosition(destP,destPart)
+	local inRange=destPos and (root.Position-destPos).Magnitude<=destP.MaxActivationDistance
+	if isR101P and State.Room101AnchorObjective~=taskText then
+		if moveForTask(taskText,destP,destPart) then State.Room101AnchorObjective=taskText end
+		return true
+	end
+	if destP.Enabled then
+		if inRange then State.EventBusy=true; triggerPrompt(destP,true,isR101P); State.EventBusy=false
+		else moveForTask(taskText,destP,destPart) end
+		return true
+	end
+	if inRange then
+		if relP then
+			if State.Cooldowns[relP] and os.clock()<State.Cooldowns[relP] then return true end
+			State.EventBusy=true; setStatus("Releasing: "..taskText,{Phase="transport"})
+			if triggerPrompt(relP,true,isR101P) then task.wait(0.3); State.TrolleyCarryState=false end
+			State.EventBusy=false; return true
+		end
+		task.wait(0.25); return true
+	end
+	moveForTask(taskText,destP,destPart); return true
+end
+local function pickStainTarget(root)
+	local stain=workspace:FindFirstChild("Stain"); if not stain then return nil,0 end
+	local target,bd,count; count=0
+	for _,sp in ipairs(stain:GetChildren()) do
+		if sp:IsA("BasePart") and sp.Parent then
+			count+=1
+			if not target then local d=(root.Position-sp.Position).Magnitude; if not bd or d<bd then target=sp; bd=d end end
+		end
+	end
+	return target,count
+end
+local function findGroundPosition(part,char,hum,root)
+	local rp=RaycastParams.new(); rp.FilterType=Enum.RaycastFilterType.Exclude
+	rp.FilterDescendantsInstances={char,part}; rp.IgnoreWater=true; rp.RespectCanCollide=true
+	local rh=part.Size.Y*0.5+4
+	local gh=workspace:Raycast(Vector3.new(part.Position.X,part.Position.Y+rh,part.Position.Z),Vector3.new(0,-(rh+6.5),0),rp)
+	if not (gh and gh.Instance.CanCollide) or gh.Normal.Y<=0.5 then return nil end
+	return Vector3.new(part.Position.X,gh.Position.Y+hum.HipHeight+root.Size.Y*0.5,part.Position.Z)
+end
+local function handleCleaning()
+	local taskText=lowerText(getTaskText())
+	if not containsAny(taskText,{"clean the area","clean area","bersihkan area"}) then return false end
+	local char,hum,root=getCharacter(); if not (char and hum and root) then return true end
+	local bp=localPlayer:FindFirstChildOfClass("Backpack"); local broom=char:FindFirstChild("Broom") or bp and bp:FindFirstChild("Broom")
+	if not broom then
+		local mopR=workspace:FindFirstChild("Lobby") and workspace.Lobby:FindFirstChild("Mop")
+		local pp=mopR and mopR:FindFirstChildWhichIsA("ProximityPrompt",true)
+		if pp and pp.Enabled then
+			local ppPart=getPromptPart(pp)
+			if ppPart and (moveToNearPrompt(pp,ppPart) or (root.Position-ppPart.Position).Magnitude<=pp.MaxActivationDistance) then triggerPrompt(pp,false); task.wait(0.2) end
+		end
+		broom=char:FindFirstChild("Broom") or bp and bp:FindFirstChild("Broom")
+		if not (broom and broom:IsA("Tool")) then return false end
+	end
+	if broom.Parent~=char then pcall(function() hum:EquipTool(broom) end); task.wait(0.12) end
+	local stainT,remaining=pickStainTarget(root); if not stainT then task.wait(0.2); return true end
+	setStatus(string.format("Cleaning (%d left)",remaining),{Phase="cleaning"})
+	local gp=findGroundPosition(stainT,char,hum,root)
+	if gp then
+		local look=Vector3.new(root.CFrame.LookVector.X,0,root.CFrame.LookVector.Z)
+		if look.Magnitude<0.05 then look=Vector3.new(0,0,-1) end
+		pcall(function() root.AssemblyLinearVelocity=Vector3.zero; root.AssemblyAngularVelocity=Vector3.zero; root.CFrame=CFrame.lookAt(gp,gp+look.Unit) end)
+	end
+	local dl=os.clock()+6
+	while State.AutoFarm and stainT.Parent and containsAny(getTaskText(),{"clean the area","clean area"}) and os.clock()<dl do pcall(function() broom:Activate() end); task.wait(0.08) end
+	return true
+end
+local function findJumpscarePrompt()
+	local story=workspace:FindFirstChild("Story"); local at=story and story:FindFirstChild("ActiveTrolley")
+	local js=at and at:FindFirstChild("Jumpscare"); local patrol=workspace:FindFirstChild("Patrol")
+	local roots={}; if js then table.insert(roots,js) end; if patrol then table.insert(roots,patrol) end
+	for _,r in ipairs(roots) do for _,d in ipairs(r:GetDescendants()) do
+		if d:IsA("ProximityPrompt") and d.Enabled and d.Parent and not State.HandledEventPrompts[d] then registerPrompt(d,false); return d end
+	end end
+	for _,p in ipairs(State.Prompts) do if p.Parent and p.Enabled and not State.HandledEventPrompts[p] and isJumpscarePrompt(p) then return p end end
+	return nil
+end
+local function queueUrgentPrompt(prompt)
+	local isJs=isJumpscarePrompt(prompt); local taskText=getTaskText()
+	if not (State.AutoFarm and prompt and prompt.Parent and prompt.Enabled and not isPromptHandled(prompt,taskText) and (isJs or promptMatchesTask(prompt,taskText))) then return false end
+	if State.UrgentEventPrompt==prompt then return true end
+	if State.UrgentEventPrompt and (State.UrgentPromptIsJumpscare or not isJs) then return false end
+	State.Cooldowns[prompt]=0; State.UrgentEventPrompt=prompt; State.UrgentRetryAt=0
+	State.UrgentPromptBaseline=lowerText(taskText); State.UrgentPromptTriggered=false
+	State.UrgentConfirmUntil=0; State.UrgentPromptIsJumpscare=isJs
+	cancelMovement(); setStatus(isJs and "JUMPSCARE!" or "Task queued",{Phase=isJs and "event" or "prompt"})
+	return true
+end
+local function clearUrgentPrompt(prompt,markHandled)
+	if prompt and State.UrgentEventPrompt~=prompt then return end
+	local ue=prompt or State.UrgentEventPrompt
+	if markHandled and ue then State.HandledEventPrompts[ue]=true end
+	State.UrgentEventPrompt=nil; State.UrgentRetryAt=0; State.UrgentPromptBaseline=nil
+	State.UrgentPromptTriggered=false; State.UrgentConfirmUntil=0; State.UrgentPromptIsJumpscare=false
+end
+local function handleUrgentPrompt()
+	local ue=State.UrgentEventPrompt; if not ue then return false end
+	local taskText=lowerText(getTaskText()); local isJs=isJumpscarePrompt(ue); local timing=getTimingProfile(ue)
+	if not isJs and isReturnStretcherTask(taskText) then clearUrgentPrompt(ue,false); return false end
+	State.UrgentPromptIsJumpscare=isJs
+	if State.UrgentPromptTriggered then
+		if not ue.Enabled then if isJs then State.Stats.JumpscaresCleared+=1 end; clearUrgentPrompt(ue,true); return false end
+		if os.clock()<State.UrgentConfirmUntil then return true end
+		State.UrgentPromptTriggered=false; State.UrgentConfirmUntil=0; State.UrgentRetryAt=os.clock()+timing.RetryDelay
+	end
+	if not (ue.Parent and ue.Enabled) or (not isJs and not promptMatchesTask(ue,taskText)) then clearUrgentPrompt(ue,false); return false end
+	if State.EventBusy or os.clock()<State.UrgentRetryAt then return true end
+	local pp=getPromptPart(ue); if not pp then State.UrgentRetryAt=os.clock()+0.2; return true end
+	State.EventBusy=true; cancelMovement()
+	local triggered=false
+	if moveToNearPrompt(ue,pp) then
+		triggered=triggerPrompt(ue,not isJs)
+		if State.UrgentEventPrompt==ue and triggered then State.UrgentPromptTriggered=true; State.UrgentConfirmUntil=os.clock()+timing.ConfirmDelay end
+	end
+	if State.UrgentEventPrompt==ue then State.UrgentRetryAt=os.clock()+timing.RetryDelay end
+	State.EventBusy=false; return true
+end
+local function checkGroupMembership() pcall(function() State.Stats.InGroup=localPlayer:IsInGroup(33970134) end) end
+local function startSoloShift()
+	if not State.AutoStartSolo then return false end
+	if os.clock()-State.LastLobbyCreateAt<5 then return false end
+	State.LastLobbyCreateAt=os.clock(); setStatus("Starting Solo Shift...",{Phase="lobby"}); queueReexecOnTeleport()
+	local server=ReplicatedStorage:FindFirstChild("Server"); local cs=server and server:FindFirstChild("CreateServer")
+	if cs and cs:IsA("RemoteEvent") then cs:FireServer({MaxPlayers=1,FriendsOnly=false,GameMode="Classic"},true); return true end
+	local start=workspace:FindFirstChild("Start"); local _,_,root=getCharacter()
+	if start and root then root.CFrame=CFrame.new(start.Position+Vector3.new(0,3,0)) end
+	return true
+end
+local handlers={
+	{Name="urgent",Delay=0.04,Run=handleUrgentPrompt},
+	{Name="minigame",Delay=0.15,Run=handleMinigame},
+	{Name="choices",Delay=0.15,Run=handleChoices},
+	{Name="phone",Delay=0.15,Run=handlePhone},
+	{Name="stretcher_pickup",Delay=0.15,Run=handleStretcherPickup},
+	{Name="stretcher_transport",Delay=0.12,Run=handleStretcherTransport},
+	{Name="cleaning",Delay=0.12,Run=handleCleaning},
+	{Name="standard",Delay=0.15,Run=handleStandardPrompt}
+}
+local function workerStep()
+	State.LastHeartbeatAt=os.clock()
+	if State.IsLobby then checkGroupMembership(); if State.AutoStartSolo and startSoloShift() then return 3 end; return 1 end
+	if not State.AutoFarm and not State.AutoMinigame then State.ActiveHandler="idle"; return 0.5 end
+	if State.AutoFarm and isShiftCompleted() then
+		if not State.ShiftCompletedLatched then State.ShiftCompletedLatched=true; State.Stats.ShiftsCompleted+=1; saveConfig() end
+		setStatus("Shift done -> lobby",{Phase="rejoin"}); queueReexecOnTeleport(); task.wait(1)
+		pcall(function() TeleportService:Teleport(122093998639862,localPlayer) end); return 2.5
+	end
+	if State.AutoFarm then local js=findJumpscarePrompt(); if js then queueUrgentPrompt(js) end end
+	for _,h in ipairs(handlers) do State.ActiveHandler=h.Name; if h.Run() then return h.Delay end end
+	State.ActiveHandler="idle"; return 0.25
+end
+local function startWorker()
+	State.WorkerCoroutine=task.spawn(function() while not State.Unloaded do local ok,wt=pcall(workerStep); task.wait(not ok and 0.5 or wt or 0.25) end end)
+end
+local function watchdog()
+	while not State.Unloaded do
+		task.wait(4); local now=os.clock(); pcall(function() GuiService:ClearError() end)
+		local dead=State.WorkerCoroutine==nil or coroutine.status(State.WorkerCoroutine)=="dead"
+		local stalled=State.AutoFarm and now-State.LastHeartbeatAt>25
+		if dead or stalled then setStatus("Watchdog revive",{Phase="recovery"}); cancelMovement(); releasePromptHold(); State.LastHeartbeatAt=now; startWorker() end
+	end
+end
+
+local MorgueAPI={}
+MorgueAPI.State=State
+function MorgueAPI.SetAutoFarm(v) State.AutoFarm=v and true or false; if not State.AutoFarm then cancelMovement(); releasePromptHold() end; setStatus(State.AutoFarm and "Auto farm ON" or "Auto farm OFF",{Phase="lifecycle"}); saveConfig(); return State.AutoFarm end
+function MorgueAPI.SetAutoStartSolo(v) State.AutoStartSolo=v and true or false; setStatus(v and "Solo ON" or "Solo OFF",{Phase="lifecycle"}); saveConfig(); return State.AutoStartSolo end
+function MorgueAPI.SetAutoMinigame(v) State.AutoMinigame=v and true or false; setStatus(v and "Minigame ON" or "Minigame OFF",{Phase="lifecycle"}); saveConfig(); return State.AutoMinigame end
+function MorgueAPI.SetNoclip(v)
+	State.Noclip=v and true or false
+	local char=localPlayer.Character
+	if State.Noclip then if char then applyNoclipOnce(char) end; setStatus("Noclip ON",{Phase="lifecycle"})
+	else if char then for _,d in ipairs(char:GetDescendants()) do if d:IsA("BasePart") then d.CanCollide=true end end end; setStatus("Noclip OFF",{Phase="lifecycle"}) end
+	saveConfig(); return State.Noclip
+end
+function MorgueAPI.SetTweenMode(v) State.TweenMode=v and true or false; setStatus(State.TweenMode and "Tween mode ON" or "Walk mode",{Phase="lifecycle"}); saveConfig(); return State.TweenMode end
+function MorgueAPI.IsAutoFarm() return State.AutoFarm end
+function MorgueAPI.IsAutoStartSolo() return State.AutoStartSolo end
+function MorgueAPI.IsAutoMinigame() return State.AutoMinigame end
+function MorgueAPI.IsNoclip() return State.Noclip end
+function MorgueAPI.IsTweenMode() return State.TweenMode end
+function MorgueAPI.GetStats() return {ShiftsCompleted=State.Stats.ShiftsCompleted or 0,MinigamesSolved=State.Stats.MinigamesSolved or 0,JumpscaresCleared=State.Stats.JumpscaresCleared or 0,CallsHandled=State.Stats.CallsHandled or 0} end
+function MorgueAPI.GetStatus() return State.Status.Message or "Idle",State.Status.Phase or "idle" end
+function MorgueAPI.ResetShiftLatched() State.ShiftCompletedLatched=false end
+function MorgueAPI.Unload() if State.Unload then State.Unload() end end
+getgenv().MorgueAPI = MorgueAPI
+
+State.Unload=function()
+	State.Unloaded=true; State.AutoFarm=false; State.AutoMinigame=false; State.AutoStartSolo=false; State.Noclip=false; State.TweenMode=false
+	releasePromptHold(); cancelMovement()
+	pcall(function() VirtualInputManager:SendMouseButtonEvent(0,0,0,false,game,0) end)
+	for _,c in ipairs(State.Connections) do pcall(function() c:Disconnect() end) end
+	table.clear(State.Connections)
+	if env.MorgueMini==State then env.MorgueMini=nil end
+	if getgenv().MorgueAPI==MorgueAPI then getgenv().MorgueAPI=nil end
+	print("[MorgueEngine] Unloaded.")
+end
+
+loadConfig(); saveConfig()
+for _,d in ipairs(workspace:GetDescendants()) do if d:IsA("ProximityPrompt") then registerPrompt(d,true) end end
+table.insert(State.Connections,workspace.DescendantAdded:Connect(function(inst) if inst:IsA("ProximityPrompt") then registerPrompt(inst,false); if State.AutoFarm then queueUrgentPrompt(inst) end end end))
+table.insert(State.Connections,localPlayer.Idled:Connect(function() pcall(function() VirtualUser:CaptureController(); VirtualUser:ClickButton2(Vector2.new()) end) end))
+local function onCharAdded(char)
+	if not char then return end
+	releasePromptHold(); cancelMovement(); State.TrolleyCarryState=nil
+	local hum=char:WaitForChild("Humanoid",5)
+	if hum then
+		hum:SetStateEnabled(Enum.HumanoidStateType.Seated,false); if hum.Sit then hum.Sit=false end
+		if State.Noclip then applyNoclipOnce(char) end
+		table.insert(State.Connections,hum.Died:Connect(function()
+			releasePromptHold(); cancelMovement(); State.TrolleyCarryState=nil; task.wait(0.8)
+			local gp=ReplicatedStorage:FindFirstChild("Gameplay"); local rh=gp and gp:FindFirstChild("RespawnHandler")
+			if rh and rh:IsA("RemoteEvent") then pcall(function() rh:FireServer() end) end
+		end))
+	end
+end
+if localPlayer.Character then onCharAdded(localPlayer.Character) end
+table.insert(State.Connections,localPlayer.CharacterAdded:Connect(onCharAdded))
+startNoclipLoop(); startWorker()
+table.insert(State.Connections,task.spawn(watchdog))
+setStatus("Engine loaded.",{Phase="lifecycle"})
+print("[MorgueEngine] Loaded.")
+
+-- ═══════════════════════════════════════════════════════════
+-- PART 1.5: OC1DVHUB ENGINE
+-- ═══════════════════════════════════════════════════════════
+local OC = {
+	AutoCollectCandy=false, AutoCollectPumpkin=false,
+	CandyInterval=2, CandyWalkSpeed=32, CandyTimeout=120, CandyMethod="walk",
+	PumpkinInterval=2, PumpkinMethod="walk", PromptBypass="Simulate",
+	ItemESP=false, PumpkinESP=false, ReaperESP=false, GhostESP=false, ShowDistance=false,
+	Fly=false, FlySpeed=80, FlyKey=Enum.KeyCode.F, Invisible=false, GodMode=false,
+	WalkSpeedEnabled=false, WalkSpeedValue=16,
+	SpeedhackEnabled=false, SpeedhackValue=60, SpeedhackAntiDetect=true,
+	InfiniteJump=false,
+	AntiAFK=true, AntiAFKInterval=90, AntiDetect=true,
+	AntiFling=true, AntiVoid=true, AutoRespawn=true,
+	Fullbright=false, NoFog=false, FPSUnlock=false,
+	Stats={ItemsFound=0,ItemsCollected=0,ItemsAttempted=0,PumpkinsFound=0,PumpkinsCollected=0,
+		PumpkinsAttempted=0,ReapersFound=0,GhostsFound=0,AFKTicks=0,CandiesCollected=0}
+}
+local itemCache,pumpkinCache,reaperCache,ghostCache = {},{},{},{}
+local countedItems,countedPumpkins = {},{}
+local antiDetect = {Enabled=true,Running=false,KicksBlocked=0,RemotesBlocked=0,MovementBlocked=0,lastPos=nil,lastTime=nil}
+local DETECT_KW = {"detect","anticheat","anti_cheat","ac_","log","report","flag","ban","kick","admin","cheat","hack","exploit","suspicious","monitor","watch","check","verify","suspect"}
+local function isDetName(n) local l=tostring(n):lower(); for _,k in ipairs(DETECT_KW) do if l:find(k,1,true) then return true end end return false end
+
+pcall(function()
+	if type(hookfunction)=="function" then hookfunction(localPlayer.Kick,function(self,...) if self==localPlayer and OC.AntiDetect then antiDetect.KicksBlocked+=1 return end end) end
+	if type(hookmetamethod)=="function" then
+		local oi,on
+		oi=hookmetamethod(game,"__index",function(self,key)
+			if OC.SpeedhackAntiDetect and OC.SpeedhackEnabled and key=="WalkSpeed" then
+				local ok,ish=pcall(function() return self:IsA("Humanoid") end)
+				if ok and ish and localPlayer.Character then local h=localPlayer.Character:FindFirstChildOfClass("Humanoid"); if h==self then return 16 end end
+			end
+			return oi(self,key)
+		end)
+		on=hookmetamethod(game,"__namecall",function(self,...)
+			local m=getnamecallmethod()
+			if antiDetect.Enabled then
+				if m=="Kick" and self==localPlayer then antiDetect.KicksBlocked+=1 return end
+				if m=="FireServer" or m=="InvokeServer" then
+					local ok,n=pcall(function() return self:GetFullName() end)
+					if ok and isDetName(n) then antiDetect.RemotesBlocked+=1 return end
+				end
+			end
+			return on(self,...)
+		end)
+	end
+end)
+
+local function getHRP() local c=localPlayer.Character; return c and (c:FindFirstChild("HumanoidRootPart") or c:FindFirstChild("Torso") or c:FindFirstChild("UpperTorso")) end
+local function getHum() local c=localPlayer.Character; return c and c:FindFirstChildOfClass("Humanoid") end
+local function hasChar() return localPlayer.Character and localPlayer.Character.Parent and getHRP()~=nil end
+
+task.spawn(function()
+	while not State.Unloaded do
+		RunService.Heartbeat:Wait()
+		if not OC.AntiDetect or not antiDetect.Running or not hasChar() then antiDetect.lastPos=nil; antiDetect.lastTime=nil; continue end
+		local hrp=getHRP(); if not hrp then continue end
+		local now,pos=tick(),hrp.Position
+		if antiDetect.lastPos and antiDetect.lastTime then
+			local dd,dt=(pos-antiDetect.lastPos).Magnitude,now-antiDetect.lastTime
+			local sp=dt>0 and (dd/dt) or 0
+			if dd>80 or (not OC.Fly and not OC.SpeedhackEnabled and sp>100) then antiDetect.MovementBlocked+=1; pcall(function() hrp.CFrame=CFrame.new(antiDetect.lastPos) end) end
+		end
+		antiDetect.lastPos,antiDetect.lastTime=hrp.Position,now
+	end
+end)
+
+task.spawn(function() while not State.Unloaded do task.wait(OC.AntiAFKInterval); if OC.AntiAFK then pcall(function() VirtualUser:CaptureController(); VirtualUser:ClickButton2(Vector2.new()); OC.Stats.AFKTicks+=1 end) end end end)
+pcall(function() localPlayer.Idled:Connect(function() if OC.AntiAFK then pcall(function() VirtualUser:CaptureController(); VirtualUser:ClickButton2(Vector2.new()) end) end end) end)
+
+task.spawn(function()
+	while not State.Unloaded do
+		task.wait(0.5); local c=localPlayer.Character
+		if c then for _,p in ipairs(c:GetChildren()) do if p:IsA("BasePart") then
+			if OC.Invisible then p.LocalTransparencyModifier=1 else p.LocalTransparencyModifier=0 end
+			if State.Noclip or OC.Invisible or OC.Fly then p.CanCollide=false else p.CanCollide=true end
+		end end end
+	end
+end)
+task.spawn(function()
+	while not State.Unloaded do task.wait(0.3)
+		if OC.SpeedhackEnabled then local h=getHum(); if h then pcall(function() h.WalkSpeed=OC.SpeedhackValue end) end
+		elseif OC.WalkSpeedEnabled then local h=getHum(); if h and math.abs(h.WalkSpeed-OC.WalkSpeedValue)>0.5 then h.WalkSpeed=OC.WalkSpeedValue end end
+	end
+end)
+task.spawn(function()
+	while not State.Unloaded do task.wait(0.5)
+		if OC.GodMode and hasChar() then local h=getHum(); if h and h.Health<h.MaxHealth then pcall(function() h.Health=h.MaxHealth end) end end
+	end
+end)
+
+UIS.JumpRequest:Connect(function()
+	if OC.InfiniteJump and hasChar() then local h=getHum(); if h then h:ChangeState(Enum.HumanoidStateType.Jumping) end end
+end)
+
+local origBrightness,origFogEnd=Lighting.Brightness,Lighting.FogEnd
+task.spawn(function()
+	while not State.Unloaded do
+		task.wait(0.5)
+		if OC.Fullbright then Lighting.Brightness=3; Lighting.ClockTime=12; Lighting.Ambient=Color3.fromRGB(200,200,200) else Lighting.Brightness=origBrightness end
+		if OC.NoFog then Lighting.FogEnd=1e6; Lighting.FogStart=1e6 else Lighting.FogEnd=origFogEnd end
+	end
+end)
+
+task.spawn(function()
+	while not State.Unloaded do
+		task.wait(0.5)
+		if OC.AntiVoid and hasChar() then local hrp=getHRP(); if hrp and hrp.Position.Y<-50 then pcall(function() hrp.CFrame=CFrame.new(0,50,0) end) end end
+	end
+end)
+
+task.spawn(function()
+	while not State.Unloaded do
+		task.wait(2)
+		if OC.AutoRespawn and localPlayer.Character then
+			local h=getHum()
+			if h and h.Health<=0 then task.wait(1.5) pcall(function()
+				local gp=ReplicatedStorage:FindFirstChild("Gameplay"); local rh=gp and gp:FindFirstChild("RespawnHandler")
+				if rh and rh:IsA("RemoteEvent") then rh:FireServer() end
+			end) end
+		end
+	end
+end)
+
+task.spawn(function()
+	while not State.Unloaded do task.wait(1)
+		if OC.FPSUnlock then pcall(function() if type(sethiddenproperty)=="function" then sethiddenproperty(RunService,"MaxFPS",999) end; if setfpscap then setfpscap(999) end end) end
+	end
+end)
+
+local flyBV,flyBG,flyConn
+local function stopFly()
+	if flyBV then pcall(function() flyBV:Destroy() end); flyBV=nil end
+	if flyBG then pcall(function() flyBG:Destroy() end); flyBG=nil end
+	if flyConn then pcall(function() flyConn:Disconnect() end); flyConn=nil end
+end
+local function startFly()
+	stopFly(); if not hasChar() then return end
+	local hrp,hum=getHRP(),getHum(); if not hrp or not hum then return end
+	flyBV=Instance.new("BodyVelocity"); flyBV.MaxForce=Vector3.new(math.huge,math.huge,math.huge); flyBV.Velocity=Vector3.zero; flyBV.Parent=hrp
+	flyBG=Instance.new("BodyGyro"); flyBG.MaxTorque=Vector3.new(math.huge,math.huge,math.huge); flyBG.P=9e4; flyBG.D=500; flyBG.CFrame=hrp.CFrame; flyBG.Parent=hrp
+	flyConn=RunService.RenderStepped:Connect(function()
+		if not OC.Fly or not hasChar() then return end
+		local h,hm=getHRP(),getHum(); if not h or not hm then return end
+		local dir=Vector3.zero
+		if hm.MoveDirection.Magnitude>0 then dir=hm.MoveDirection end
+		if UIS:IsKeyDown(Enum.KeyCode.Space) then dir=dir+Vector3.new(0,1,0) end
+		if UIS:IsKeyDown(Enum.KeyCode.LeftControl) then dir=dir+Vector3.new(0,-1,0) end
+		if dir.Magnitude>0 then dir=dir.Unit end
+		flyBV.Velocity=dir*OC.FlySpeed; flyBG.CFrame=workspace.CurrentCamera.CFrame
+	end)
+end
+UIS.InputBegan:Connect(function(i,g) if not g and i.KeyCode==OC.FlyKey then OC.Fly=not OC.Fly; if OC.Fly then startFly() else stopFly() end end end)
+localPlayer.CharacterAdded:Connect(function() task.wait(1); if OC.Fly then startFly() end end)
+
+local ITEM_KW={"trickortreatitem","trickortreat","trick_or_treat","trick","treat","candy","candies","sweet","halloweenitem","eventitem","collectitem","pickupitem"}
+local ITEM_BL={"prompt","ui","gui","shop","sign","spawner","spawn","effect","sound","particle","highlight","button","text","label","screen","folder"}
+local PUM_KW={"spookypumpkin","spooky_pumpkin","spooky pumpkin","pumpkin","pumkin","jacko","jackolantern","jack_o_lantern","halloweenpumpkin","pumpkinitem","pumpkin_item"}
+local PUM_BL={"prompt","ui","gui","shop","sign","spawner","spawn","effect","sound","particle","highlight","button","text","label","screen","folder","decal","texture","mesh","light","beam","trail"}
+local GHOST_KW={"ghost","hantu","spirit","phantom","wraith","soul","specter","spectre","haunt","poltergeist","banshee","revenant","demon","devil","monster","zombie","skeleton","skull","shadow","nightmare","undead","curse"}
+local GHOST_BL={"ghostbuster","ghost_shop","ghostsign","ghost_ui","soulmate","soul_shop","console","shining","souvenir"}
+local function checkN(name,kw,bl) local l=name:lower(); for _,b in ipairs(bl) do if l:find(b,1,true) then return false end end; for _,k in ipairs(kw) do if l:find(k,1,true) then return true end end return false end
+local function extractPart(o)
+	if not o or not o.Parent then return nil end
+	if o:IsA("BasePart") or o:IsA("MeshPart") then return o end
+	if o:IsA("Model") then return o.PrimaryPart or o:FindFirstChildWhichIsA("BasePart") or o:FindFirstChildWhichIsA("MeshPart") end
+	if o:IsA("Tool") then return o:FindFirstChildWhichIsA("BasePart") end
+	if o:IsA("Folder") then return o:FindFirstChildWhichIsA("BasePart",true) end
+	return nil
+end
+local function scanByKW(kw,bl,excl)
+	local found,seen={},{}
+	pcall(function() for _,o in ipairs(workspace:GetDescendants()) do
+		if not o.Parent or seen[o] then continue end
+		if checkN(o.Name,kw,bl) then
+			if excl and checkN(o.Name,excl,{}) then continue end
+			local part=extractPart(o)
+			if part and part.Parent then
+				local root=part:FindFirstAncestorOfClass("Model") or o
+				if not seen[root] then seen[root]=true; table.insert(found,{model=root,part=part,name=o.Name,source=o}) end
+			end
+		end
+	end end)
+	return found
+end
+local function scanItems() return scanByKW(ITEM_KW,ITEM_BL,PUM_KW) end
+local function scanPumpkins() return scanByKW(PUM_KW,PUM_BL,ITEM_KW) end
+local function scanReapers()
+	local f={}
+	pcall(function() for _,o in ipairs(workspace:GetDescendants()) do
+		if o:IsA("Model") then local n=o.Name:lower()
+			if (n:find("reaper") or n:find("death") or n:find("grim")) and not Players:GetPlayerFromCharacter(o) then
+				local p=extractPart(o); if p then table.insert(f,{model=o,part=p}) end
+			end
+		end
+	end end)
+	return f
+end
+local function scanGhosts()
+	local found,seen={},{}
+	pcall(function() for _,o in ipairs(workspace:GetDescendants()) do
+		if o:IsA("Model") and not Players:GetPlayerFromCharacter(o) then
+			local n=o.Name:lower(); local bl=false
+			for _,b in ipairs(GHOST_BL) do if n:find(b,1,true) then bl=true; break end end
+			if not bl then for _,kw in ipairs(GHOST_KW) do
+				if n==kw or n:find("^"..kw.."_") or n:find("^"..kw.." ") or n:find(" "..kw.." ") or n:find(" "..kw.."$") then
+					local hum=o:FindFirstChildOfClass("Humanoid")
+					if hum and hum.Health>0 and not seen[o] then seen[o]=true; local p=extractPart(o)
+						if p then table.insert(found,{model=o,part=p,name=o.Name}) end
+					end
+					break
+				end
+			end end
+		end
+	end end)
+	return found
+end
+local scanCache={items={},pumpkins={},lastUpdate=0}
+local function refreshCache() if tick()-scanCache.lastUpdate>0.8 then scanCache.items=scanItems(); scanCache.pumpkins=scanPumpkins(); scanCache.lastUpdate=tick() end end
+local function getCI() refreshCache(); return scanCache.items end
+local function getCP() refreshCache(); return scanCache.pumpkins end
+
+local function ocWalk(tp,timeout,speed)
+	timeout=timeout or 120; speed=speed or 32
+	if not hasChar() or not tp or not tp.Parent then return false end
+	local hrp,hum=getHRP(),getHum(); if not hrp or not hum then return false end
+	local os_=hum.WalkSpeed; hum.WalkSpeed=speed
+	local success,st=false,tick()
+	if (hrp.Position-tp.Position).Magnitude<5 then hum.WalkSpeed=os_; return true end
+	local path=PathfindingService:CreatePath({AgentRadius=2,AgentHeight=5,AgentCanJump=true,AgentCanClimb=true,WaypointSpacing=8})
+	local ok=pcall(function() path:ComputeAsync(hrp.Position,tp.Position) end)
+	if ok and path.Status==Enum.PathStatus.Success then
+		for _,wp in ipairs(path:GetWaypoints()) do
+			if tick()-st>timeout then break end
+			if not hasChar() or not tp.Parent then break end
+			if wp.Action==Enum.PathWaypointAction.Jump then pcall(function() hum.Jump=true end); task.wait(0.2) end
+			pcall(function() hum:MoveTo(wp.Position) end)
+			local ws=tick()
+			while tick()-ws<5 do
+				if tick()-st>timeout then break end
+				if not hasChar() then break end
+				local h2=getHRP(); if not h2 then break end
+				if (h2.Position-wp.Position).Magnitude<3.5 then break end
+				task.wait(0.08)
+			end
+			task.wait(0.03)
+		end
+		if hasChar() and tp.Parent then success=(getHRP().Position-tp.Position).Magnitude<10 end
+	end
+	if not success then
+		local fs,lpt=tick(),tick(); local ld=(getHRP().Position-tp.Position).Magnitude; local stuck=0
+		while tick()-fs<timeout do
+			if not hasChar() or not tp.Parent then break end
+			local h=getHRP(); if not h then break end
+			local dir=tp.Position-h.Position; local dist=dir.Magnitude
+			if dist<5 then success=true; break end
+			local now=tick()
+			if math.abs(ld-dist)<0.8 then
+				if now-lpt>2.5 then pcall(function() hum.Jump=true end); stuck+=1; lpt=now
+					if stuck>=5 then local s=Vector3.new(dir.Unit.Z,0,-dir.Unit.X)*10; pcall(function() hum:MoveTo(h.Position+s) end); task.wait(0.6); stuck=0 end
+				end
+			else lpt=now; ld=dist end
+			local fd=Vector3.new(dir.X,0,dir.Z)
+			if fd.Magnitude>0 then pcall(function() hum:MoveTo(h.Position+fd.Unit*math.min(dist,12)) end) end
+			task.wait(0.1)
+		end
+	end
+	if hasChar() then pcall(function() hum:MoveTo(getHRP().Position) end) end
+	hum.WalkSpeed=os_; return success
+end
+local function collectItem(data)
+	if not data or not data.part or not data.part.Parent then return false end
+	local part,model=data.part,data.model; local hrp=getHRP(); if not hrp then return false end
+	if (part.Position-hrp.Position).Magnitude>15 then return false end
+	local claimed,prompts=false,{}
+	local pM=model:FindFirstChildWhichIsA("ProximityPrompt",true); if pM then table.insert(prompts,pM) end
+	local pP=part:FindFirstChildWhichIsA("ProximityPrompt"); if pP and pP~=pM then table.insert(prompts,pP) end
+	if #prompts>0 then
+		for _,pr in ipairs(prompts) do
+			local oH,oD=pr.HoldDuration,pr.MaxActivationDistance
+			if OC.PromptBypass=="Simulate" then
+				pcall(function() pr.MaxActivationDistance=math.max(oD,20); pr.Enabled=true end)
+				pcall(function() if pr.PromptButtonHoldBegan then pr.PromptButtonHoldBegan:Fire(localPlayer) end end)
+				task.wait(math.max(oH,0.1))
+				pcall(function() if fireproximityprompt then fireproximityprompt(pr,0) end end)
+			elseif OC.PromptBypass=="Alternative" then
+				local cM=model:FindFirstChildWhichIsA("ClickDetector",true)
+				if cM and fireclickdetector then pcall(function() fireclickdetector(cM) end); task.wait(0.1)
+				elseif firetouchinterest then pcall(function() firetouchinterest(hrp,part,0); task.wait(0.05); firetouchinterest(hrp,part,1) end); task.wait(0.1) end
+				if part.Parent and model.Parent then pcall(function() pr.HoldDuration=0; pr.MaxActivationDistance=9e9; if fireproximityprompt then fireproximityprompt(pr,0) end end) end
+			else
+				pcall(function() pr.MaxActivationDistance=9e9; pr.HoldDuration=0; pr.Enabled=true; if fireproximityprompt then fireproximityprompt(pr,0) end end)
+			end
+			task.wait(0.1)
+			if not part.Parent or not model.Parent then claimed=true; break end
+		end
+	else
+		local cM=model:FindFirstChildWhichIsA("ClickDetector",true)
+		if cM and fireclickdetector then pcall(function() fireclickdetector(cM) end); task.wait(0.1) end
+		if firetouchinterest then pcall(function() firetouchinterest(hrp,part,0); task.wait(0.05); firetouchinterest(hrp,part,1) end); task.wait(0.1) end
+		if not part.Parent or not model.Parent then claimed=true end
+	end
+	return claimed
+end
+local function createHL(model,color,name)
+	if not model or not model.Parent then return end
+	local e=model:FindFirstChild(name); if e then e:Destroy() end
+	local hl=Instance.new("Highlight"); hl.Name=name; hl.FillColor=color; hl.OutlineColor=Color3.fromRGB(255,255,255)
+	hl.FillTransparency=0.6; hl.OutlineTransparency=0.1; hl.DepthMode=Enum.HighlightDepthMode.AlwaysOnTop; hl.Adornee=model; hl.Parent=model
+end
+local function createTag(part,label,color,tagName)
+	if not part or not part.Parent then return end
+	local e=part:FindFirstChild(tagName); if e then e:Destroy() end
+	local bb=Instance.new("BillboardGui"); bb.Name=tagName; bb.Size=UDim2.fromOffset(200,40); bb.StudsOffset=Vector3.new(0,3,0); bb.AlwaysOnTop=true; bb.Adornee=part
+	local lbl=Instance.new("TextLabel",bb); lbl.Name="NameLbl"; lbl.Size=UDim2.new(1,0,0,20); lbl.BackgroundTransparency=1; lbl.Text=label; lbl.TextColor3=color
+	lbl.TextStrokeTransparency=0; lbl.TextStrokeColor3=Color3.new(0,0,0); lbl.TextSize=14; lbl.Font=Enum.Font.GothamBold
+	local dL=Instance.new("TextLabel",bb); dL.Name="DistLbl"; dL.Size=UDim2.new(1,0,0,16); dL.Position=UDim2.new(0,0,0,22); dL.BackgroundTransparency=1
+	dL.Text="---"; dL.TextColor3=Color3.new(1,1,1); dL.TextStrokeTransparency=0; dL.TextStrokeColor3=Color3.new(0,0,0); dL.TextSize=12; dL.Font=Enum.Font.GothamBold
+	bb.Parent=part
+end
+local function removeESP(model)
+	if not model then return end
+	for _,c in ipairs(model:GetChildren()) do if c.Name:find("ESP_HL") then c:Destroy() end end
+	for _,p in ipairs(model:GetDescendants()) do if p:IsA("BasePart") then for _,t in ipairs(p:GetChildren()) do if t.Name:find("ESP_Tag") then t:Destroy() end end end end
+end
+local C_Pri,C_Orng,C_Red,C_Pur,C_Grn,C_Yel,C_Cyn=Color3.fromRGB(255,145,80),Color3.fromRGB(255,165,0),Color3.fromRGB(255,100,110),Color3.fromRGB(191,90,242),Color3.fromRGB(110,220,140),Color3.fromRGB(255,210,110),Color3.fromRGB(110,200,245)
+
+task.spawn(function() while not State.Unloaded do task.wait(OC.CandyInterval)
+	if OC.AutoCollectCandy and hasChar() then
+		antiDetect.Running=true; local items=getCI()
+		if #items>0 then
+			local hrp=getHRP(); for _,d in ipairs(items) do d.dist=(d.part.Position-hrp.Position).Magnitude end
+			table.sort(items,function(a,b) return a.dist<b.dist end)
+			local c=0
+			for _,d in ipairs(items) do
+				if not hasChar() or c>=10 then break end
+				if OC.CandyMethod=="path" then ocWalk(d.part,OC.CandyTimeout,OC.CandyWalkSpeed)
+				elseif d.dist>5 then ocWalk(d.part,OC.CandyTimeout,OC.CandyWalkSpeed) end
+				task.wait(0.15); OC.Stats.ItemsAttempted+=1
+				local cl=collectItem(d)
+				if not cl then task.wait(0.2); cl=collectItem(d) end
+				if cl and not d.model.Parent then
+					if not countedItems[d.model] then countedItems[d.model]=true; OC.Stats.ItemsCollected+=1; OC.Stats.CandiesCollected+=1 end
+					c+=1; task.wait(0.2)
+				end
+			end
+		end
+		antiDetect.Running=false
+	end
+end end)
+task.spawn(function() while not State.Unloaded do task.wait(OC.PumpkinInterval)
+	if OC.AutoCollectPumpkin and hasChar() then
+		antiDetect.Running=true; local pk=getCP()
+		if #pk>0 then
+			local hrp=getHRP(); for _,d in ipairs(pk) do d.dist=(d.part.Position-hrp.Position).Magnitude end
+			table.sort(pk,function(a,b) return a.dist<b.dist end)
+			local c=0
+			for _,d in ipairs(pk) do
+				if not hasChar() or c>=10 then break end
+				if OC.PumpkinMethod=="path" then ocWalk(d.part,OC.CandyTimeout,OC.CandyWalkSpeed)
+				elseif d.dist>5 then ocWalk(d.part,OC.CandyTimeout,OC.CandyWalkSpeed) end
+				task.wait(0.15); OC.Stats.PumpkinsAttempted+=1
+				local cl=collectItem(d)
+				if not cl then task.wait(0.2); cl=collectItem(d) end
+				if cl and not d.model.Parent then
+					if not countedPumpkins[d.model] then countedPumpkins[d.model]=true; OC.Stats.PumpkinsCollected+=1 end
+					c+=1; task.wait(0.2)
+				end
+			end
+		end
+		antiDetect.Running=false
+	end
+end end)
+task.spawn(function() while not State.Unloaded do task.wait(3)
+	OC.Stats.ItemsFound=#getCI(); OC.Stats.PumpkinsFound=#getCP()
+	for m in pairs(countedItems) do if not m.Parent then countedItems[m]=nil end end
+	for m in pairs(countedPumpkins) do if not m.Parent then countedPumpkins[m]=nil end end
+end end)
+
+task.spawn(function() while not State.Unloaded do task.wait(2)
+	if OC.ItemESP then
+		local items=getCI(); local cur={}
+		for _,d in ipairs(items) do cur[d.model]=d end
+		for m in pairs(itemCache) do if not cur[m] or not m.Parent then removeESP(m); itemCache[m]=nil end end
+		for m,d in pairs(cur) do if not itemCache[m] then createHL(m,C_Pri,"ItemESP_HL"); createTag(d.part,m.Name,C_Pri,"ItemESP_Tag"); itemCache[m]=d end end
+	elseif next(itemCache) then for m in pairs(itemCache) do removeESP(m) end; itemCache={} end
+	if OC.PumpkinESP then
+		local pk=getCP(); local cur={}
+		for _,d in ipairs(pk) do cur[d.model]=d end
+		for m in pairs(pumpkinCache) do if not cur[m] or not m.Parent then removeESP(m); pumpkinCache[m]=nil end end
+		for m,d in pairs(cur) do if not pumpkinCache[m] then createHL(m,C_Orng,"PumpkinESP_HL"); createTag(d.part,m.Name,C_Orng,"PumpkinESP_Tag"); pumpkinCache[m]=d end end
+	elseif next(pumpkinCache) then for m in pairs(pumpkinCache) do removeESP(m) end; pumpkinCache={} end
+	if OC.ReaperESP then
+		local rs=scanReapers(); OC.Stats.ReapersFound=#rs; local cur={}
+		for _,d in ipairs(rs) do cur[d.model]=d end
+		for m in pairs(reaperCache) do if not cur[m] or not m.Parent then removeESP(m); reaperCache[m]=nil end end
+		for m,d in pairs(cur) do if not reaperCache[m] then createHL(m,C_Red,"ReaperESP_HL"); createTag(d.part,m.Name,C_Red,"ReaperESP_Tag"); reaperCache[m]=d end end
+	elseif next(reaperCache) then for m in pairs(reaperCache) do removeESP(m) end; reaperCache={} end
+	if OC.GhostESP then
+		local gs=scanGhosts(); OC.Stats.GhostsFound=#gs; local cur={}
+		for _,d in ipairs(gs) do cur[d.model]=d end
+		for m in pairs(ghostCache) do if not cur[m] or not m.Parent then removeESP(m); ghostCache[m]=nil end end
+		for m,d in pairs(cur) do if not ghostCache[m] then createHL(m,C_Pur,"GhostESP_HL"); createTag(d.part,d.name,C_Pur,"GhostESP_Tag"); ghostCache[m]=d end end
+	elseif next(ghostCache) then for m in pairs(ghostCache) do removeESP(m) end; ghostCache={} end
+end end)
+task.spawn(function() while not State.Unloaded do task.wait(1)
+	if OC.ShowDistance and hasChar() then
+		local hrp=getHRP()
+		local function upd(cache,tag,base)
+			for m,d in pairs(cache) do if d.part and d.part.Parent then
+				local ds=(d.part.Position-hrp.Position).Magnitude
+				local bb=d.part:FindFirstChild(tag)
+				if bb then local dl=bb:FindFirstChild("DistLbl")
+					if dl then local c=base; if ds>200 then c=C_Yel elseif ds>500 then c=C_Red end
+						dl.Text=math.floor(ds).." studs"; dl.TextColor3=c end end
+			end end
+		end
+		upd(itemCache,"ItemESP_Tag",C_Grn); upd(pumpkinCache,"PumpkinESP_Tag",C_Orng); upd(reaperCache,"ReaperESP_Tag",C_Red); upd(ghostCache,"GhostESP_Tag",C_Cyn)
+	end
+end end)
+
+OC.ServerHop=function()
+	local ok,servers=pcall(function() return HttpService:JSONDecode(game:HttpGet("https://games.roblox.com/v1/games/"..game.PlaceId.."/servers/Public?sortOrder=Asc&limit=100")) end)
+	if ok and servers and servers.data then
+		local candidates={}
+		for _,s in ipairs(servers.data) do if s.playing<s.maxPlayers and s.id~=game.JobId then table.insert(candidates,s.id) end end
+		if #candidates>0 then
+			local target=candidates[math.random(1,#candidates)]
+			pcall(function() TeleportService:TeleportToPlaceInstance(game.PlaceId,target,localPlayer) end)
+		end
+	end
+end
+OC.Unload=function()
+	if OC.Fly then stopFly() end
+	for m in pairs(itemCache) do removeESP(m) end
+	for m in pairs(pumpkinCache) do removeESP(m) end
+	for m in pairs(reaperCache) do removeESP(m) end
+	for m in pairs(ghostCache) do removeESP(m) end
+	Lighting.Brightness=origBrightness; Lighting.FogEnd=origFogEnd
+	if env.Oc1DvHUB==OC then env.Oc1DvHUB=nil end
+end
+env.Oc1DvHUB = OC
+print("[Oc1DvHUB] Engine loaded.")
+
+-- ═══════════════════════════════════════════════════════════
+-- PART 2: NEW UI LIBRARY v8.3 (dari user)
+-- ═══════════════════════════════════════════════════════════
+local G = {down="v",search=utf8.char(128269),wave=utf8.char(128075),home=utf8.char(127968),refresh=utf8.char(128260)}
+local Lib = {}
+local ASSET_BG = "rbxassetid://75442560708193"
+local ASSET_LOGO = "rbxassetid://114060815284146"
+local Themes = {
+	Midnight = {Bg=Color3.fromRGB(20,22,30),Card=Color3.fromRGB(34,38,52),Side=Color3.fromRGB(26,30,44),Hover=Color3.fromRGB(52,58,80),Text=Color3.fromRGB(255,255,255),Sub=Color3.fromRGB(196,202,220),Off=Color3.fromRGB(90,92,104),Line=Color3.fromRGB(90,100,130),Accent=Color3.fromRGB(10,132,255)},
+	Rose = {Bg=Color3.fromRGB(30,18,26),Card=Color3.fromRGB(50,30,42),Side=Color3.fromRGB(38,22,32),Hover=Color3.fromRGB(72,42,60),Text=Color3.fromRGB(255,255,255),Sub=Color3.fromRGB(232,192,212),Off=Color3.fromRGB(110,80,95),Line=Color3.fromRGB(140,90,115),Accent=Color3.fromRGB(255,105,150)},
+	Emerald = {Bg=Color3.fromRGB(14,28,24),Card=Color3.fromRGB(24,48,42),Side=Color3.fromRGB(18,36,31),Hover=Color3.fromRGB(36,70,60),Text=Color3.fromRGB(255,255,255),Sub=Color3.fromRGB(182,222,206),Off=Color3.fromRGB(70,100,90),Line=Color3.fromRGB(70,130,110),Accent=Color3.fromRGB(52,211,153)},
+	Gold = {Bg=Color3.fromRGB(28,24,16),Card=Color3.fromRGB(50,42,26),Side=Color3.fromRGB(36,30,18),Hover=Color3.fromRGB(72,60,34),Text=Color3.fromRGB(255,255,255),Sub=Color3.fromRGB(226,212,172),Off=Color3.fromRGB(110,98,70),Line=Color3.fromRGB(140,120,70),Accent=Color3.fromRGB(240,190,60)},
+	Light = {Bg=Color3.fromRGB(240,244,252),Card=Color3.fromRGB(255,255,255),Side=Color3.fromRGB(226,232,244),Hover=Color3.fromRGB(232,238,250),Text=Color3.fromRGB(28,28,30),Sub=Color3.fromRGB(90,96,110),Off=Color3.fromRGB(200,204,214),Line=Color3.fromRGB(205,210,222),Accent=Color3.fromRGB(10,132,255)}
+}
+local Theme = {}
+for k,v in pairs(Themes.Midnight) do Theme[k]=v end
+local STATUS = {Green=Color3.fromRGB(48,209,88),Red=Color3.fromRGB(255,69,58),Yellow=Color3.fromRGB(255,214,10)}
+
+local function hex(c) return string.format("%02X%02X%02X",math.floor(c.R*255+0.5),math.floor(c.G*255+0.5),math.floor(c.B*255+0.5)) end
+local BRAND_BASE,BRAND_HUB = "Oc1Dv","HUB"
+local function brandString() return string.format('<font color="#%s">%s</font><font color="#%s">%s</font>',hex(Theme.Text),BRAND_BASE,hex(Theme.Accent),BRAND_HUB) end
+
+local bound,refreshers={},{}
+local function bind(obj,prop,key) obj[prop]=Theme[key]; table.insert(bound,{obj,prop,key}) end
+local function applyTheme()
+	for i=#bound,1,-1 do
+		local b=bound[i]
+		if not b[1]:IsDescendantOf(game) then table.remove(bound,i)
+		else TweenService:Create(b[1],TweenInfo.new(0.25),{[b[2]]=Theme[b[3]]}):Play() end
+	end
+	for _,f in ipairs(refreshers) do f() end
+end
+local function new(class,props,parent) local o=Instance.new(class); for k,v in pairs(props) do o[k]=v end; if parent then o.Parent=parent end; return o end
+local function round(o,r) new("UICorner",{CornerRadius=UDim.new(0,r)},o) end
+local function tween(o,t,p) TweenService:Create(o,TweenInfo.new(t,Enum.EasingStyle.Quint,Enum.EasingDirection.Out),p):Play() end
+local function isPress(i) return i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch end
+local function isMove(i) return i.UserInputType==Enum.UserInputType.MouseMovement or i.UserInputType==Enum.UserInputType.Touch end
+local function drag(handle,target)
+	local st={moved=false}; local dragging,start,startPos
+	handle.InputBegan:Connect(function(i)
+		if isPress(i) then
+			dragging,start,startPos,st.moved=true,i.Position,target.Position,false
+			i.Changed:Connect(function() if i.UserInputState==Enum.UserInputState.End then dragging=false end end)
+		end
+	end)
+	UIS.InputChanged:Connect(function(i)
+		if dragging and isMove(i) then
+			local d=i.Position-start; if d.Magnitude>6 then st.moved=true end
+			target.Position=UDim2.new(startPos.X.Scale,startPos.X.Offset+d.X,startPos.Y.Scale,startPos.Y.Offset+d.Y)
+		end
+	end)
+	return st
+end
+local function ripple(container,x,y)
+	local ap=container.AbsolutePosition
+	local r=new("Frame",{Size=UDim2.fromOffset(0,0),Position=UDim2.fromOffset(x-ap.X,y-ap.Y),AnchorPoint=Vector2.new(0.5,0.5),BackgroundColor3=Color3.new(1,1,1),BackgroundTransparency=0.8,ZIndex=5},container)
+	round(r,100)
+	local s=math.max(container.AbsoluteSize.X,container.AbsoluteSize.Y)*2
+	tween(r,0.5,{Size=UDim2.fromOffset(s,s),BackgroundTransparency=1})
+	task.delay(0.5,function() r:Destroy() end)
+end
+local function glowLayers(parent,pos,w,h,r,color,spread,base)
+	local layers={}; base=base or {0.8,0.88,0.94}
+	for n=3,1,-1 do
+		local g=spread*n/3
+		local f=new("Frame",{Position=UDim2.new(pos.X.Scale,pos.X.Offset-g,pos.Y.Scale,pos.Y.Offset-g),Size=UDim2.fromOffset(w+g*2,h+g*2),BackgroundColor3=color or Theme.Accent,BackgroundTransparency=base[n],BorderSizePixel=0},parent)
+		round(f,r+g)
+		if not color then bind(f,"BackgroundColor3","Accent") end
+		layers[n]=f
+	end
+	return layers
+end
+local function iconBar(parent,cx,cy,w,h,rot,mode,corner)
+	local f=new("Frame",{Size=UDim2.fromOffset(w,h),Position=UDim2.fromOffset(cx,cy),AnchorPoint=Vector2.new(0.5,0.5),BorderSizePixel=0,Rotation=rot or 0,BackgroundColor3=(mode=="cutout") and Theme.Side or Theme.Sub},parent)
+	round(f,corner or math.min(w,h)/2)
+	f:SetAttribute((mode=="cutout") and "IconCutout" or "IconInk",true)
+	return f
+end
+local DrawnIcons = {
+	home=function(box) iconBar(box,6,6,8.5,1.8,-45); iconBar(box,12,6,8.5,1.8,45); iconBar(box,3,13,1.8,8,0); iconBar(box,15,13,1.8,8,0); iconBar(box,9,16.5,12,1.8,0) end,
+	gear=function(box)
+		iconBar(box,9,9,13,13,0); iconBar(box,9,9,6,6,0,"cutout")
+		for i=0,7 do local a=math.rad(i*45); iconBar(box,9+math.cos(a)*7.3,9+math.sin(a)*7.3,2.2,2.2,math.deg(a)) end
+	end,
+	eye=function(box) iconBar(box,9,9,16,9,0); iconBar(box,9,9,4,4,0,"cutout") end,
+	user=function(box) iconBar(box,9,4.5,6,6,0); iconBar(box,9,13.5,12,6,0) end,
+	box=function(box) iconBar(box,9,9,13,13,0); iconBar(box,9,9,9,9,0,"cutout",1.5) end,
+	list=function(box) iconBar(box,9,3.5,13,1.8,0); iconBar(box,9,9,13,1.8,0); iconBar(box,9,14.5,13,1.8,0) end,
+	shield=function(box) iconBar(box,9,7,12,8,0); iconBar(box,9,11,8.5,8.5,45) end,
+	moon=function(box) iconBar(box,9,9,12,12,0); iconBar(box,12,8,9,9,0,"cutout") end
+}
+local function makeIcon(parent,icon,size)
+	size=size or 18
+	if type(icon)=="table" and icon.drawn and DrawnIcons[icon.drawn] then
+		local holder=new("Frame",{Size=UDim2.fromOffset(size,size),Position=UDim2.new(0,11,0.5,-size/2),BackgroundTransparency=1},parent)
+		local inner=new("Frame",{Size=UDim2.fromOffset(18,18),Position=UDim2.new(0.5,-9,0.5,-9),BackgroundTransparency=1},holder)
+		new("UIScale",{Scale=size/18},inner)
+		DrawnIcons[icon.drawn](inner)
+		table.insert(refreshers,function()
+			if not holder.Parent then return end
+			for _,d in ipairs(inner:GetDescendants()) do if d:IsA("Frame") and d:GetAttribute("IconCutout") then d.BackgroundColor3=Theme.Side end end
+		end)
+		return holder
+	end
+	if type(icon)=="number" then icon="rbxassetid://"..icon end
+	if type(icon)=="string" and icon:find("rbxassetid") then
+		return new("ImageLabel",{Size=UDim2.fromOffset(size,size),Position=UDim2.new(0,11,0.5,-size/2),BackgroundTransparency=1,Image=icon,ImageColor3=Theme.Sub},parent)
+	end
+	return new("TextLabel",{Size=UDim2.fromOffset(size,size),Position=UDim2.new(0,11,0.5,-size/2),BackgroundTransparency=1,Text=icon or "*",TextSize=size-2,Font=Enum.Font.GothamBold,TextColor3=Theme.Sub,TextTransparency=0.4},parent)
+end
+
+function Lib:CreateWindow(title,opts)
+	opts=opts or {}; local Window={}; local customTitle=title
+	local toggleKey=opts.ToggleKey or Enum.KeyCode.RightShift
+	local BG_IMAGE=opts.Background or ASSET_BG; local LOGO_IMAGE=opts.Logo or ASSET_LOGO
+	local plr=Players.LocalPlayer
+	local function topTitleText() if customTitle then return string.format('<font color="#%s">%s</font>',hex(Theme.Text),customTitle) end return brandString() end
+	local gui=new("ScreenGui",{Name="YorukaUI",ResetOnSpawn=false,IgnoreGuiInset=true,ZIndexBehavior=Enum.ZIndexBehavior.Sibling},plr:WaitForChild("PlayerGui"))
+	local blur=new("BlurEffect",{Name="YorukaBlur",Size=(opts.Blur==false) and 0 or 8},Lighting)
+	gui.Destroying:Connect(function() blur:Destroy() end)
+	local fpsNow=0
+	do
+		local frames,last=0,os.clock()
+		local conn=RunService.RenderStepped:Connect(function() frames=frames+1 end)
+		gui.Destroying:Connect(function() conn:Disconnect() end)
+		task.spawn(function() while gui.Parent do task.wait(0.5); local now=os.clock(); fpsNow=math.floor(frames/math.max(now-last,0.001)+0.5); frames=0; last=now end end)
+	end
+	local function getPing()
+		local ok,p=pcall(function() return StatsSvc.Network.ServerStatsItem["Data Ping"]:GetValue() end)
+		if ok and type(p)=="number" and p>0 then return p end
+		local ok2,n=pcall(function() return plr:GetNetworkPing() end)
+		if ok2 and type(n)=="number" then return n*1000 end
+		return nil
+	end
+	function Window:GetFPS() return fpsNow end
+	function Window:GetPing() return getPing() end
+	local tip=new("TextLabel",{Visible=false,AutomaticSize=Enum.AutomaticSize.XY,Size=UDim2.fromOffset(0,0),BackgroundColor3=Color3.fromRGB(16,18,24),TextColor3=Color3.new(1,1,1),Font=Enum.Font.GothamMedium,TextSize=12,ZIndex=100,Text=""},gui)
+	round(tip,8)
+	new("UIPadding",{PaddingLeft=UDim.new(0,8),PaddingRight=UDim.new(0,8),PaddingTop=UDim.new(0,5),PaddingBottom=UDim.new(0,5)},tip)
+	local tipToken=0
+	local function attachTip(obj,text,cond)
+		obj.MouseEnter:Connect(function() tipToken=tipToken+1; local my=tipToken; task.delay(0.5,function() if my==tipToken and (not cond or cond()) then local m=UIS:GetMouseLocation(); tip.Text=text; tip.Position=UDim2.fromOffset(m.X+12,m.Y+12); tip.Visible=true end end) end)
+		obj.MouseMoved:Connect(function() if tip.Visible then local m=UIS:GetMouseLocation(); tip.Position=UDim2.fromOffset(m.X+12,m.Y+12) end end)
+		obj.MouseLeave:Connect(function() tipToken=tipToken+1; tip.Visible=false end)
+	end
+	local function ctl(frame,extra) local t=extra or {}; t.Frame=frame; t.SetTooltip=function(self,s) attachTip(frame,s); return self end; return t end
+	local vp=workspace.CurrentCamera.ViewportSize
+	local W,H=math.min(520,vp.X-30),math.min(340,vp.Y-70)
+	local SIDE=(W<440) and 112 or 150
+	local NORMAL=UDim2.fromOffset(W,H)
+	local BIG=UDim2.fromOffset(math.min(660,vp.X-30),math.min(420,vp.Y-70))
+	local curSize=NORMAL; local sideW=SIDE; local collapsed=false; local hudEnabled=true
+	local openPalette,closePalette,setCollapsed,updateHud
+	local main=new("Frame",{Size=NORMAL,Position=UDim2.new(0.5,-W/2,0.5,-H/2),ClipsDescendants=true},gui)
+	bind(main,"BackgroundColor3","Bg"); round(main,16)
+	local uiScale=new("UIScale",{Scale=1},main)
+	local stroke=new("UIStroke",{Thickness=1,Transparency=0.55},main); bind(stroke,"Color","Line")
+	local bgImg=new("ImageLabel",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,Image=BG_IMAGE,ScaleType=Enum.ScaleType.Crop,ZIndex=0},main); round(bgImg,16)
+	local overlay=new("Frame",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=opts.Overlay or 0.88,ZIndex=1},main); bind(overlay,"BackgroundColor3","Bg"); round(overlay,16)
+	local gloss=new("Frame",{Size=UDim2.new(1,0,1,0),BackgroundColor3=Color3.new(1,1,1),BorderSizePixel=0,ZIndex=1},main); round(gloss,16)
+	new("UIGradient",{Rotation=90,Transparency=NumberSequence.new({NumberSequenceKeypoint.new(0,0.82),NumberSequenceKeypoint.new(0.42,1),NumberSequenceKeypoint.new(1,1)})},gloss)
+	local shine=new("Frame",{Size=UDim2.new(1,0,1,0),BackgroundColor3=Color3.new(1,1,1),BorderSizePixel=0,ZIndex=1},main); round(shine,16)
+	local shineGrad=new("UIGradient",{Rotation=25,Transparency=NumberSequence.new({NumberSequenceKeypoint.new(0,1),NumberSequenceKeypoint.new(0.42,1),NumberSequenceKeypoint.new(0.5,0.7),NumberSequenceKeypoint.new(0.58,1),NumberSequenceKeypoint.new(1,1)}),Offset=Vector2.new(-1,0)},shine)
+	task.spawn(function()
+		while gui.Parent do
+			shineGrad.Offset=Vector2.new(-1,0)
+			TweenService:Create(shineGrad,TweenInfo.new(1.8,Enum.EasingStyle.Quad,Enum.EasingDirection.InOut),{Offset=Vector2.new(1,0)}):Play()
+			task.wait(1.8+4.2)
+		end
+	end)
+	local top=new("Frame",{Size=UDim2.new(1,0,0,44),BackgroundTransparency=0.4},main); bind(top,"BackgroundColor3","Side"); round(top,16)
+	local ttl=new("TextLabel",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,RichText=true,Text=topTitleText(),Font=Enum.Font.GothamBold,TextSize=15,TextStrokeTransparency=0.7},top)
+	bind(ttl,"TextColor3","Text")
+	table.insert(refreshers,function() if ttl.Parent then ttl.Text=topTitleText() end end)
+	drag(top,main)
+	local open=true
+	local function setOpen(state)
+		open=state; if updateHud then updateHud() end
+		if state then
+			main.Visible=true; tween(main,0.35,{Size=curSize}); if opts.Blur~=false then tween(blur,0.35,{Size=8}) end
+		else
+			tween(main,0.3,{Size=UDim2.fromOffset(curSize.X.Offset,0)}); tween(blur,0.3,{Size=0})
+			task.delay(0.3,function() if not open then main.Visible=false end end)
+		end
+	end
+	local hud=new("Frame",{Size=UDim2.fromOffset(132,30),Position=UDim2.new(0.5,-66,0,10),BackgroundTransparency=0.2,Visible=false},gui)
+	bind(hud,"BackgroundColor3","Bg"); round(hud,15)
+	local hudStroke=new("UIStroke",{Thickness=1,Transparency=0.5},hud); bind(hudStroke,"Color","Line")
+	local hudDot=new("Frame",{Size=UDim2.fromOffset(8,8),Position=UDim2.new(0,12,0.5,-4),BackgroundColor3=STATUS.Green},hud); round(hudDot,4)
+	local hudTxt=new("TextLabel",{Size=UDim2.new(1,-30,1,0),Position=UDim2.new(0,26,0,0),BackgroundTransparency=1,Text="-- fps | -- ms",Font=Enum.Font.GothamBold,TextSize=12,TextXAlignment=Enum.TextXAlignment.Left},hud)
+	bind(hudTxt,"TextColor3","Text")
+	local hst=drag(hud,hud)
+	hud.InputEnded:Connect(function(i) if isPress(i) and not hst.moved then setOpen(true) end end)
+	updateHud=function() hud.Visible=hudEnabled and not open end
+	task.spawn(function()
+		while gui.Parent do
+			if hud.Visible then
+				local ping=getPing()
+				if ping then hudTxt.Text=fpsNow.." fps | "..math.floor(ping).." ms" else hudTxt.Text=fpsNow.." fps | -- ms" end
+				if fpsNow>=50 then hudDot.BackgroundColor3=STATUS.Green elseif fpsNow>=30 then hudDot.BackgroundColor3=STATUS.Yellow else hudDot.BackgroundColor3=STATUS.Red end
+			end
+			task.wait(0.5)
+		end
+	end)
+	local function dot(color,x,cb) local b=new("TextButton",{Size=UDim2.fromOffset(14,14),Position=UDim2.new(0,x,0.5,-7),BackgroundColor3=color,Text="",AutoButtonColor=false},top); round(b,7); b.MouseButton1Click:Connect(cb) end
+	dot(STATUS.Red,16,function() setOpen(false) end)
+	dot(STATUS.Yellow,38,function() setOpen(false) end)
+	dot(STATUS.Green,60,function() curSize=(curSize~=NORMAL) and NORMAL or BIG; tween(main,0.35,{Size=curSize}) end)
+	local menuBtn=new("TextButton",{Size=UDim2.fromOffset(26,26),Position=UDim2.new(0,82,0.5,-13),BackgroundTransparency=1,Text="",AutoButtonColor=false},top)
+	for n=0,2 do local ln=new("Frame",{Size=UDim2.fromOffset(14,2),Position=UDim2.new(0.5,-7,0.5,-5+n*5),BorderSizePixel=0},menuBtn); bind(ln,"BackgroundColor3","Sub"); round(ln,1) end
+	menuBtn.MouseButton1Click:Connect(function() setCollapsed(not collapsed) end)
+	local palBtn=new("TextButton",{Size=UDim2.fromOffset(26,26),Position=UDim2.new(1,-38,0.5,-13),BackgroundTransparency=1,Text=G.search,TextSize=15,AutoButtonColor=false},top)
+	palBtn.MouseButton1Click:Connect(function() openPalette() end)
+	local grip=new("TextButton",{Size=UDim2.fromOffset(24,24),Position=UDim2.new(1,-24,1,-24),BackgroundTransparency=1,Text="",ZIndex=25,AutoButtonColor=false},main)
+	local gripDots={{16,16},{10,16},{4,16},{16,10},{10,10},{16,4}}
+	for _,p in ipairs(gripDots) do local d=new("Frame",{Size=UDim2.fromOffset(3,3),Position=UDim2.fromOffset(p[1],p[2]),BorderSizePixel=0,ZIndex=26},grip); bind(d,"BackgroundColor3","Sub"); round(d,1) end
+	local resizing,gStart,gSize=false,nil,nil
+	grip.InputBegan:Connect(function(i)
+		if isPress(i) then resizing=true; gStart=i.Position; gSize=curSize
+			i.Changed:Connect(function() if i.UserInputState==Enum.UserInputState.End then resizing=false end end)
+		end
+	end)
+	UIS.InputChanged:Connect(function(i)
+		if resizing and isMove(i) then
+			local d=(i.Position-gStart)/uiScale.Scale
+			curSize=UDim2.fromOffset(math.clamp(gSize.X.Offset+d.X,380,800),math.clamp(gSize.Y.Offset+d.Y,260,560))
+			main.Size=curSize
+		end
+	end)
+	local floatWrap=new("Frame",{Size=UDim2.fromOffset(52,52),Position=UDim2.new(0,16,0.5,-26),BackgroundTransparency=1},gui)
+	local fBase={0.82,0.9,0.95}
+	local fGlow=glowLayers(floatWrap,UDim2.new(0,0,0,0),52,52,26,nil,10,fBase)
+	for n,g in ipairs(fGlow) do TweenService:Create(g,TweenInfo.new(1.4,Enum.EasingStyle.Sine,Enum.EasingDirection.InOut,-1,true),{BackgroundTransparency=fBase[n]+0.05}):Play() end
+	local floatBtn=new("ImageButton",{Size=UDim2.new(1,0,1,0),Image=LOGO_IMAGE,ScaleType=Enum.ScaleType.Crop,AutoButtonColor=false},floatWrap)
+	bind(floatBtn,"BackgroundColor3","Accent"); round(floatBtn,26)
+	local fStroke=new("UIStroke",{Thickness=1.5,Transparency=0.3},floatBtn); bind(fStroke,"Color","Accent")
+	local fst=drag(floatBtn,floatWrap)
+	floatBtn.MouseButton1Click:Connect(function() if not fst.moved then setOpen(not open) end end)
+	UIS.InputBegan:Connect(function(i,gp) if not gp and i.KeyCode==toggleKey then setOpen(not open) end end)
+	local sideBg=new("Frame",{Size=UDim2.new(0,sideW,1,-44),Position=UDim2.new(0,0,0,44),BackgroundTransparency=0.45},main)
+	bind(sideBg,"BackgroundColor3","Side"); round(sideBg,16)
+	local side=new("ScrollingFrame",{Size=UDim2.new(1,0,1,-28),BackgroundTransparency=1,BorderSizePixel=0,ScrollBarThickness=0,CanvasSize=UDim2.new(),AutomaticCanvasSize=Enum.AutomaticSize.Y},sideBg)
+	new("UIListLayout",{Padding=UDim.new(0,6),SortOrder=Enum.SortOrder.LayoutOrder},side)
+	new("UIPadding",{PaddingTop=UDim.new(0,10),PaddingLeft=UDim.new(0,8),PaddingRight=UDim.new(0,8)},side)
+	local foot=new("TextLabel",{Size=UDim2.new(1,0,0,24),Position=UDim2.new(0,0,1,-26),BackgroundTransparency=1,Text="RRFMLY UI",Font=Enum.Font.Gotham,TextSize=11,TextStrokeTransparency=0.7},sideBg)
+	bind(foot,"TextColor3","Sub")
+	local pages=new("Frame",{Size=UDim2.new(1,-sideW,1,-44),Position=UDim2.new(0,sideW,0,44),BackgroundTransparency=1},main)
+	local search=new("TextBox",{Size=UDim2.new(1,-24,0,30),Position=UDim2.new(0,12,0,10),Text="",PlaceholderText=G.search.."  Cari fitur...",ClearTextOnFocus=false,Font=Enum.Font.GothamMedium,TextSize=13,TextXAlignment=Enum.TextXAlignment.Left,BackgroundTransparency=0.3},pages)
+	new("UIPadding",{PaddingLeft=UDim.new(0,12)},search)
+	bind(search,"BackgroundColor3","Card"); bind(search,"TextColor3","Text"); bind(search,"PlaceholderColor3","Sub"); round(search,10)
+	local tabs,current={},nil
+	local function refreshTabs()
+		for _,t in ipairs(tabs) do
+			local sel=(t==current)
+			t.btn.BackgroundColor3=Theme.Text; t.bar.BackgroundColor3=Theme.Accent
+			tween(t.btn,0.2,{BackgroundTransparency=sel and 0.92 or 1})
+			tween(t.bar,0.2,{BackgroundTransparency=sel and 0 or 1})
+			t.txt.TextColor3=sel and Theme.Text or Theme.Sub
+			local c=sel and Theme.Accent or Theme.Sub
+			if t.icon:IsA("ImageLabel") then t.icon.ImageColor3=c
+			elseif t.icon:IsA("TextLabel") then tween(t.icon,0.2,{TextTransparency=sel and 0 or 0.4})
+			elseif t.icon:IsA("Frame") then
+				for _,d in ipairs(t.icon:GetDescendants()) do if d:IsA("Frame") and d:GetAttribute("IconInk") then tween(d,0.2,{BackgroundColor3=c}) end end
+			end
+		end
+	end
+	table.insert(refreshers,refreshTabs)
+	local function applyFilter()
+		if not current then return end
+		local q=search.Text:lower()
+		for _,it in ipairs(current.items) do it.frame.Visible=(q=="") or (it.name~="" and it.name:lower():find(q,1,true)~=nil) end
+	end
+	search:GetPropertyChangedSignal("Text"):Connect(applyFilter)
+	local function selectTab(t,instant)
+		local changed=(current~=t); current=t
+		for _,x in ipairs(tabs) do
+			if x==t then
+				x.page.Visible=true
+				if changed and not instant then
+					x.page.GroupTransparency=1; x.page.Position=UDim2.new(0,16,0,50)
+					tween(x.page,0.3,{GroupTransparency=0,Position=UDim2.new(0,0,0,50)})
+				else x.page.GroupTransparency=0; x.page.Position=UDim2.new(0,0,0,50) end
+			else x.page.Visible=false end
+		end
+		refreshTabs(); applyFilter()
+	end
+	setCollapsed=function(state)
+		collapsed=state and true or false; sideW=collapsed and 56 or SIDE
+		tween(sideBg,0.3,{Size=UDim2.new(0,sideW,1,-44)})
+		tween(pages,0.3,{Position=UDim2.new(0,sideW,0,44),Size=UDim2.new(1,-sideW,1,-44)})
+		foot.Visible=not collapsed
+		for _,t in ipairs(tabs) do
+			if collapsed then t.txt.Visible=false
+			else task.delay(0.15,function() if not collapsed then t.txt.Visible=true end end) end
+		end
+	end
+	local palDim=new("TextButton",{Size=UDim2.new(1,0,1,0),BackgroundColor3=Color3.new(0,0,0),BackgroundTransparency=0.45,Text="",AutoButtonColor=false,ZIndex=45,Visible=false},main)
+	round(palDim,16)
+	local palBox=new("Frame",{Size=UDim2.new(1,-40,1,-76),AnchorPoint=Vector2.new(0.5,0),Position=UDim2.new(0.5,0,0,56),Active=true},palDim)
+	bind(palBox,"BackgroundColor3","Card"); round(palBox,14)
+	new("UISizeConstraint",{MaxSize=Vector2.new(340,300)},palBox)
+	local palStroke=new("UIStroke",{Thickness=1,Transparency=0.4},palBox); bind(palStroke,"Color","Line")
+	local palInput=new("TextBox",{Size=UDim2.new(1,-24,0,34),Position=UDim2.new(0,12,0,12),Text="",PlaceholderText="Cari fitur... (Esc untuk tutup)",ClearTextOnFocus=false,Font=Enum.Font.GothamMedium,TextSize=13,TextXAlignment=Enum.TextXAlignment.Left},palBox)
+	new("UIPadding",{PaddingLeft=UDim.new(0,12)},palInput)
+	bind(palInput,"BackgroundColor3","Bg"); bind(palInput,"TextColor3","Text"); bind(palInput,"PlaceholderColor3","Sub"); round(palInput,10)
+	local palList=new("ScrollingFrame",{Size=UDim2.new(1,-24,1,-62),Position=UDim2.new(0,12,0,54),BackgroundTransparency=1,BorderSizePixel=0,ScrollBarThickness=3,CanvasSize=UDim2.new(),AutomaticCanvasSize=Enum.AutomaticSize.Y},palBox)
+	new("UIListLayout",{Padding=UDim.new(0,4),SortOrder=Enum.SortOrder.LayoutOrder},palList)
+	local firstHit=nil
+	closePalette=function() palDim.Visible=false; palInput:ReleaseFocus() end
+	local function jumpTo(t,it)
+		closePalette(); selectTab(t)
+		task.delay(0.35,function()
+			local sc=t.scroll
+			if sc and it.frame.Parent then
+				local y=it.frame.AbsolutePosition.Y-sc.AbsolutePosition.Y+sc.CanvasPosition.Y-8
+				sc.CanvasPosition=Vector2.new(0,math.max(0,y))
+			end
+			if it.stroke then it.stroke.Color=Theme.Accent; it.stroke.Transparency=0; tween(it.stroke,1,{Transparency=0.85,Color=Color3.new(1,1,1)}) end
+		end)
+	end
+	local function palRefresh()
+		for _,ch in ipairs(palList:GetChildren()) do if ch:IsA("TextButton") then ch:Destroy() end end
+		firstHit=nil; local q=palInput.Text:lower(); local count=0
+		for _,t in ipairs(tabs) do for _,it in ipairs(t.items) do
+			if count>=40 then break end
+			local hit=it.title and (q=="" or it.title:lower():find(q,1,true)~=nil or it.name:lower():find(q,1,true)~=nil)
+			if hit then
+				count=count+1; if not firstHit then firstHit={t,it} end
+				local r=new("TextButton",{Size=UDim2.new(1,-6,0,34),BackgroundTransparency=0.3,Text="",AutoButtonColor=false,LayoutOrder=count},palList)
+				bind(r,"BackgroundColor3","Bg"); round(r,8)
+				local a=new("TextLabel",{Size=UDim2.new(1,-112,1,0),Position=UDim2.new(0,10,0,0),BackgroundTransparency=1,Text=it.title,Font=Enum.Font.GothamMedium,TextSize=13,TextXAlignment=Enum.TextXAlignment.Left,TextTruncate=Enum.TextTruncate.AtEnd},r)
+				bind(a,"TextColor3","Text")
+				local b=new("TextLabel",{Size=UDim2.new(0,100,1,0),Position=UDim2.new(1,-108,0,0),BackgroundTransparency=1,Text=t.name,Font=Enum.Font.Gotham,TextSize=11,TextXAlignment=Enum.TextXAlignment.Right,TextTruncate=Enum.TextTruncate.AtEnd},r)
+				bind(b,"TextColor3","Sub")
+				r.MouseButton1Click:Connect(function() jumpTo(t,it) end)
+			end
+		end end
+	end
+	palInput:GetPropertyChangedSignal("Text"):Connect(palRefresh)
+	palInput.FocusLost:Connect(function(enter,input)
+		if enter and firstHit then jumpTo(firstHit[1],firstHit[2])
+		elseif input and input.KeyCode==Enum.KeyCode.Escape then closePalette() end
+	end)
+	palDim.MouseButton1Click:Connect(function() closePalette() end)
+	openPalette=function() palDim.Visible=true; palInput.Text=""; palRefresh(); palInput:CaptureFocus() end
+	UIS.InputBegan:Connect(function(i,gp)
+		if gp or not open then return end
+		if i.KeyCode==Enum.KeyCode.K and (UIS:IsKeyDown(Enum.KeyCode.LeftControl) or UIS:IsKeyDown(Enum.KeyCode.RightControl)) then
+			if palDim.Visible then closePalette() else openPalette() end
+		end
+	end)
+	function Window:AddTab(name,icon)
+		local Tab={items={}}
+		local btn=new("TextButton",{Size=UDim2.new(1,0,0,38),BackgroundColor3=Theme.Text,BackgroundTransparency=1,Text="",AutoButtonColor=false},side)
+		round(btn,10)
+		local bar=new("Frame",{Size=UDim2.new(0,3,1,-16),Position=UDim2.new(0,0,0,8),BackgroundColor3=Theme.Accent,BackgroundTransparency=1,BorderSizePixel=0},btn)
+		local icn=makeIcon(btn,icon,18)
+		local txt=new("TextLabel",{Size=UDim2.new(1,-46,1,0),Position=UDim2.new(0,38,0,0),BackgroundTransparency=1,Text=name,Font=Enum.Font.GothamMedium,TextSize=13,TextXAlignment=Enum.TextXAlignment.Left,TextTruncate=Enum.TextTruncate.AtEnd},btn)
+		txt.Visible=not collapsed
+		attachTip(btn,name,function() return collapsed end)
+		local group=new("CanvasGroup",{Size=UDim2.new(1,0,1,-50),Position=UDim2.new(0,0,0,50),BackgroundTransparency=1,Visible=false},pages)
+		local page=new("ScrollingFrame",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,BorderSizePixel=0,ScrollBarThickness=3,CanvasSize=UDim2.new(),AutomaticCanvasSize=Enum.AutomaticSize.Y},group)
+		new("UIListLayout",{Padding=UDim.new(0,8),SortOrder=Enum.SortOrder.LayoutOrder},page)
+		new("UIPadding",{PaddingTop=UDim.new(0,4),PaddingLeft=UDim.new(0,12),PaddingRight=UDim.new(0,14),PaddingBottom=UDim.new(0,12)},page)
+		Tab.btn=btn; Tab.txt=txt; Tab.page=group; Tab.scroll=page; Tab.name=name; Tab.bar=bar; Tab.icon=icn
+		table.insert(tabs,Tab); btn.MouseButton1Click:Connect(function() selectTab(Tab) end)
+		if #tabs==1 then selectTab(Tab,true) end
+		local function card(h,cname,ctitle)
+			local f=new("Frame",{Size=UDim2.new(1,0,0,h),BackgroundTransparency=0.3,ClipsDescendants=true},page)
+			bind(f,"BackgroundColor3","Card"); round(f,12)
+			local st=new("UIStroke",{Color=Color3.new(1,1,1),Transparency=0.85,Thickness=1},f)
+			table.insert(Tab.items,{frame=f,name=cname or "",title=ctitle,stroke=st})
+			f.MouseEnter:Connect(function() tween(f,0.15,{BackgroundColor3=Theme.Hover}); tween(st,0.15,{Color=Theme.Accent,Transparency=0.5}) end)
+			f.MouseLeave:Connect(function() tween(f,0.15,{BackgroundColor3=Theme.Card}); tween(st,0.15,{Color=Color3.new(1,1,1),Transparency=0.85}) end)
+			return f
+		end
+		local function lbl(parent,text,key,size,font)
+			local l=new("TextLabel",{Size=UDim2.new(1,-150,0,42),Position=UDim2.new(0,14,0,0),BackgroundTransparency=1,Text=text,Font=font or Enum.Font.GothamMedium,TextSize=size or 14,TextXAlignment=Enum.TextXAlignment.Left,TextTruncate=Enum.TextTruncate.AtEnd},parent)
+			bind(l,"TextColor3",key or "Text"); return l
+		end
+		local function header(c,h)
+			local b=new("TextButton",{Size=UDim2.new(1,0,0,h or 42),BackgroundTransparency=1,Text="",AutoButtonColor=false},c)
+			b.MouseButton1Down:Connect(function(x,y) ripple(c,x,y) end)
+			return b
+		end
+		function Tab:AddSection(text)
+			local f=new("Frame",{Size=UDim2.new(1,0,0,22),BackgroundTransparency=1},page)
+			table.insert(Tab.items,{frame=f,name="",title=text})
+			local l=new("TextLabel",{Size=UDim2.new(1,-8,1,0),Position=UDim2.new(0,4,0,4),BackgroundTransparency=1,Text=string.upper(text),Font=Enum.Font.GothamBold,TextSize=11,TextXAlignment=Enum.TextXAlignment.Left,TextStrokeTransparency=0.6},f)
+			bind(l,"TextColor3","Sub")
+		end
+		function Tab:AddParagraph(ptitle,body)
+			local c=card(0,ptitle.." "..body,ptitle)
+			c.Size=UDim2.new(1,0,0,0); c.AutomaticSize=Enum.AutomaticSize.Y
+			new("UIPadding",{PaddingTop=UDim.new(0,12),PaddingBottom=UDim.new(0,12),PaddingLeft=UDim.new(0,14),PaddingRight=UDim.new(0,14)},c)
+			new("UIListLayout",{Padding=UDim.new(0,4),SortOrder=Enum.SortOrder.LayoutOrder},c)
+			local t=new("TextLabel",{Size=UDim2.new(1,0,0,18),BackgroundTransparency=1,Text=ptitle,Font=Enum.Font.GothamBold,TextSize=14,TextXAlignment=Enum.TextXAlignment.Left,LayoutOrder=1},c)
+			bind(t,"TextColor3","Text")
+			local b=new("TextLabel",{Size=UDim2.new(1,0,0,0),AutomaticSize=Enum.AutomaticSize.Y,BackgroundTransparency=1,Text=body,Font=Enum.Font.Gotham,TextSize=12,TextWrapped=true,TextXAlignment=Enum.TextXAlignment.Left,TextYAlignment=Enum.TextYAlignment.Top,LayoutOrder=2},c)
+			bind(b,"TextColor3","Sub")
+			return ctl(c,{SetText=function(_,x) b.Text=x end})
+		end
+		function Tab:AddButton(text,cb,confirmText)
+			local c=card(42,text,text)
+			local b=header(c); b.Text=text; b.Font=Enum.Font.GothamBold; b.TextSize=14
+			bind(b,"TextColor3","Accent")
+			b.MouseButton1Click:Connect(function()
+				if confirmText then Window:Confirm(confirmText,cb)
+				elseif cb then task.spawn(cb) end
+			end)
+			return ctl(c)
+		end
+		function Tab:AddToggle(text,default,cb)
+			local state=default or false; local c=card(42,text,text); lbl(c,text)
+			local track=new("TextButton",{Size=UDim2.fromOffset(46,26),Position=UDim2.new(1,-58,0,8),Text="",AutoButtonColor=false},c); round(track,13)
+			local knob=new("Frame",{Size=UDim2.fromOffset(22,22),BackgroundColor3=Color3.new(1,1,1)},track); round(knob,11)
+			local function paint(animate)
+				local col=state and STATUS.Green or Theme.Off
+				local pos=state and UDim2.new(1,-24,0.5,-11) or UDim2.new(0,2,0.5,-11)
+				if animate then tween(track,0.25,{BackgroundColor3=col}); tween(knob,0.25,{Position=pos})
+				else track.BackgroundColor3=col; knob.Position=pos end
+			end
+			paint(false); table.insert(refreshers,function() paint(false) end)
+			local function set(v,silent) state=v and true or false; paint(true); if not silent and cb then task.spawn(cb,state) end end
+			track.MouseButton1Click:Connect(function() set(not state) end)
+			return ctl(c,{Set=function(_,v,silent) set(v,silent) end,Get=function() return state end})
+		end
+		function Tab:AddSlider(text,min,max,default,cb)
+			local value=default or min; local c=card(58,text,text)
+			local l=lbl(c,text..": "..value); l.Size=UDim2.new(1,-28,0,30)
+			local bar=new("Frame",{Size=UDim2.new(1,-28,0,6),Position=UDim2.new(0,14,0,40)},c)
+			bind(bar,"BackgroundColor3","Off"); round(bar,3)
+			local fill=new("Frame",{Size=UDim2.new((value-min)/(max-min),0,1,0)},bar)
+			bind(fill,"BackgroundColor3","Accent"); round(fill,3)
+			local sliding=false
+			local function set(v,silent) value=math.clamp(math.floor(v),min,max); fill.Size=UDim2.new((value-min)/(max-min),0,1,0); l.Text=text..": "..value; if not silent and cb then task.spawn(cb,value) end end
+			local function update(x) set(min+(max-min)*math.clamp((x-bar.AbsolutePosition.X)/bar.AbsoluteSize.X,0,1)) end
+			bar.InputBegan:Connect(function(i) if isPress(i) then sliding=true; update(i.Position.X) end end)
+			UIS.InputEnded:Connect(function(i) if isPress(i) then sliding=false end end)
+			UIS.InputChanged:Connect(function(i) if sliding and isMove(i) then update(i.Position.X) end end)
+			return ctl(c,{Set=function(_,v,silent) set(v,silent) end,Get=function() return value end})
+		end
+		function Tab:AddDropdown(text,options,default,cb)
+			local cur=default or options[1]; local c=card(42,text,text); lbl(c,text)
+			local val=new("TextLabel",{Size=UDim2.new(0,120,0,42),Position=UDim2.new(1,-134,0,0),BackgroundTransparency=1,Text=tostring(cur).." "..G.down,Font=Enum.Font.Gotham,TextSize=13,TextXAlignment=Enum.TextXAlignment.Right},c)
+			bind(val,"TextColor3","Sub")
+			local h=header(c)
+			local list=new("Frame",{Size=UDim2.new(1,0,0,#options*30),Position=UDim2.new(0,0,0,42),BackgroundTransparency=1},c)
+			new("UIListLayout",{SortOrder=Enum.SortOrder.LayoutOrder},list)
+			local isOpen=false
+			local function toggle(s) isOpen=s; tween(c,0.25,{Size=UDim2.new(1,0,0,s and (42+#options*30) or 42)}) end
+			local function set(v,silent) cur=v; val.Text=tostring(v).." "..G.down; if not silent and cb then task.spawn(cb,v) end end
+			for _,opt in ipairs(options) do
+				local ob=new("TextButton",{Size=UDim2.new(1,0,0,30),BackgroundTransparency=1,Text=tostring(opt),Font=Enum.Font.GothamMedium,TextSize=13,AutoButtonColor=false},list)
+				bind(ob,"TextColor3","Text")
+				ob.MouseButton1Click:Connect(function() set(opt); toggle(false) end)
+			end
+			h.MouseButton1Click:Connect(function() toggle(not isOpen) end)
+			return ctl(c,{Set=function(_,v,silent) set(v,silent) end,Get=function() return cur end})
+		end
+		function Tab:AddKeybind(text,default,cb,onChange)
+			local key=default or Enum.KeyCode.F; local listening=false; local c=card(42,text,text); lbl(c,text)
+			local b=new("TextButton",{Size=UDim2.new(0,90,0,26),Position=UDim2.new(1,-102,0,8),Text=key.Name,Font=Enum.Font.GothamBold,TextSize=12,AutoButtonColor=false},c)
+			bind(b,"BackgroundColor3","Bg"); bind(b,"TextColor3","Accent"); round(b,8)
+			b.MouseButton1Click:Connect(function() listening=true; b.Text="..." end)
+			local function set(k) key=k; b.Text=key.Name; if onChange then task.spawn(onChange,key) end end
+			UIS.InputBegan:Connect(function(i,gp)
+				if listening then
+					if i.UserInputType==Enum.UserInputType.Keyboard then
+						listening=false
+						if i.KeyCode==Enum.KeyCode.Escape then b.Text=key.Name else set(i.KeyCode) end
+					end
+				elseif not gp and i.KeyCode==key and cb then task.spawn(cb,key) end
+			end)
+			return ctl(c,{Get=function() return key end})
+		end
+		-- Home komponen (dipakai tab Rumah baru)
+		function Tab:AddGreeting()
+			local c=card(58,"sapaan selamat datang","Sapaan")
+			local a=new("TextLabel",{Size=UDim2.new(1,-28,0,28),Position=UDim2.new(0,14,0,6),BackgroundTransparency=1,Font=Enum.Font.GothamBold,TextSize=17,TextXAlignment=Enum.TextXAlignment.Left,TextTruncate=Enum.TextTruncate.AtEnd},c)
+			bind(a,"TextColor3","Text")
+			local b=new("TextLabel",{Size=UDim2.new(1,-28,0,18),Position=UDim2.new(0,14,0,34),BackgroundTransparency=1,Font=Enum.Font.Gotham,TextSize=12,TextXAlignment=Enum.TextXAlignment.Left},c)
+			bind(b,"TextColor3","Sub")
+			local function upd()
+				local h=tonumber(os.date("%H")); local g="Selamat malam"
+				if h>=4 and h<11 then g="Selamat pagi" elseif h>=11 and h<15 then g="Selamat siang" elseif h>=15 and h<18 then g="Selamat sore" end
+				a.Text=g..", "..plr.DisplayName.." "..G.wave; b.Text=os.date("%A, %d %B %Y")
+			end
+			upd(); task.spawn(function() while c.Parent do task.wait(30); upd() end end)
+			return ctl(c)
+		end
+		function Tab:AddProfile()
+			local c=card(84,"profil avatar nama username","Profil")
+			glowLayers(c,UDim2.new(0,12,0,12),60,60,30,nil,9,{0.76,0.87,0.94})
+			local ring=new("Frame",{Size=UDim2.fromOffset(60,60),Position=UDim2.new(0,12,0,12)},c); bind(ring,"BackgroundColor3","Bg"); round(ring,30)
+			local rs=new("UIStroke",{Thickness=2},ring); bind(rs,"Color","Accent")
+			local av=new("ImageLabel",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,ScaleType=Enum.ScaleType.Crop},ring); round(av,30)
+			task.spawn(function() local ok,img=pcall(function() return Players:GetUserThumbnailAsync(plr.UserId,Enum.ThumbnailType.AvatarBust,Enum.ThumbnailSize.Size150x150) end); if ok then av.Image=img end end)
+			local function txt(y,h,text,size,font,key)
+				local l=new("TextLabel",{Size=UDim2.new(1,-96,0,h),Position=UDim2.new(0,84,0,y),BackgroundTransparency=1,Text=text,Font=font,TextSize=size,TextXAlignment=Enum.TextXAlignment.Left,TextTruncate=Enum.TextTruncate.AtEnd},c)
+				bind(l,"TextColor3",key)
+			end
+			txt(13,22,plr.DisplayName,16,Enum.Font.GothamBold,"Text")
+			txt(35,16,"@"..plr.Name,12,Enum.Font.GothamMedium,"Accent")
+			txt(54,16,"ID "..plr.UserId.."  |  Akun "..plr.AccountAge.." hari",11,Enum.Font.Gotham,"Sub")
+			return ctl(c)
+		end
+		function Tab:AddGraph(gtitle,sampler,maxV,unit,invert)
+			local N=40; local c=card(96,gtitle.." grafik",gtitle.." (grafik)")
+			local t=new("TextLabel",{Size=UDim2.new(0.6,0,0,22),Position=UDim2.new(0,14,0,6),BackgroundTransparency=1,Text=gtitle,Font=Enum.Font.GothamBold,TextSize=12,TextXAlignment=Enum.TextXAlignment.Left},c)
+			bind(t,"TextColor3","Sub")
+			local v=new("TextLabel",{Size=UDim2.new(0.4,-14,0,22),Position=UDim2.new(0.6,0,0,6),BackgroundTransparency=1,Text="--",Font=Enum.Font.GothamBold,TextSize=13,TextXAlignment=Enum.TextXAlignment.Right},c)
+			bind(v,"TextColor3","Text")
+			local area=new("Frame",{Size=UDim2.new(1,-28,0,56),Position=UDim2.new(0,14,0,32),BackgroundTransparency=1},c)
+			local bars,vals={},{}
+			for i=1,N do
+				vals[i]=0
+				local b=new("Frame",{AnchorPoint=Vector2.new(0,1),Size=UDim2.new(1/N,-2,0.03,0),Position=UDim2.new((i-1)/N,0,1,0),BorderSizePixel=0,BackgroundColor3=STATUS.Green},area)
+				round(b,2); bars[i]=b
+			end
+			task.spawn(function()
+				while c.Parent do
+					local ok,s=pcall(sampler); if not ok then s=nil end
+					table.remove(vals,1); table.insert(vals,s or 0)
+					if s then v.Text=math.floor(s)..unit else v.Text="--" end
+					for i,b in ipairs(bars) do
+						local p=math.clamp(vals[i]/maxV,0.03,1); local q=p
+						if invert then q=1-p end
+						b.Size=UDim2.new(1/N,-2,p,0)
+						if q>=0.6 then b.BackgroundColor3=STATUS.Green elseif q>=0.35 then b.BackgroundColor3=STATUS.Yellow else b.BackgroundColor3=STATUS.Red end
+					end
+					task.wait(0.5)
+				end
+			end)
+			return ctl(c)
+		end
+		function Tab:AddStats()
+			local c=card(64,"fps ping pemain uptime statistik server","Statistik Server")
+			local names={"FPS","Ping","Pemain","Uptime"}; local vals={}
+			for i,n in ipairs(names) do
+				local x=(i-1)/4
+				local k=new("TextLabel",{Size=UDim2.new(0.25,0,0,18),Position=UDim2.new(x,0,0,8),BackgroundTransparency=1,Text=n,Font=Enum.Font.GothamMedium,TextSize=11},c)
+				bind(k,"TextColor3","Sub")
+				local v=new("TextLabel",{Size=UDim2.new(0.25,0,0,28),Position=UDim2.new(x,0,0,26),BackgroundTransparency=1,Text="--",Font=Enum.Font.GothamBold,TextSize=14},c)
+				if n=="FPS" or n=="Ping" then v.TextColor3=Theme.Text else bind(v,"TextColor3","Text") end
+				vals[n]=v
+			end
+			task.spawn(function()
+				while c.Parent do
+					vals.FPS.Text=tostring(fpsNow)
+					if fpsNow>=50 then vals.FPS.TextColor3=STATUS.Green elseif fpsNow>=30 then vals.FPS.TextColor3=STATUS.Yellow else vals.FPS.TextColor3=STATUS.Red end
+					local ping=getPing()
+					if ping then vals.Ping.Text=math.floor(ping).." ms"; if ping<=100 then vals.Ping.TextColor3=STATUS.Green elseif ping<=200 then vals.Ping.TextColor3=STATUS.Yellow else vals.Ping.TextColor3=STATUS.Red end
+					else vals.Ping.Text="--" end
+					vals.Pemain.Text=#Players:GetPlayers().."/"..Players.MaxPlayers
+					local t=math.floor(workspace.DistributedGameTime)
+					if t>=3600 then vals.Uptime.Text=string.format("%d:%02d:%02d",math.floor(t/3600),math.floor(t%3600/60),t%60)
+					else vals.Uptime.Text=string.format("%d:%02d",math.floor(t/60),t%60) end
+					task.wait(0.5)
+				end
+			end)
+			return ctl(c)
+		end
+		function Tab:AddGameInfo()
+			local c=card(92,"info game id job place nama","Info Game")
+			local function row(i,key,value)
+				local y=8+(i-1)*26
+				local k=new("TextLabel",{Size=UDim2.new(0,64,0,24),Position=UDim2.new(0,14,0,y),BackgroundTransparency=1,Text=key,Font=Enum.Font.GothamMedium,TextSize=12,TextXAlignment=Enum.TextXAlignment.Left},c)
+				bind(k,"TextColor3","Sub")
+				local v=new("TextLabel",{Size=UDim2.new(1,-92,0,24),Position=UDim2.new(0,80,0,y),BackgroundTransparency=1,Text=value,Font=Enum.Font.GothamBold,TextSize=12,TextXAlignment=Enum.TextXAlignment.Left,TextTruncate=Enum.TextTruncate.AtEnd},c)
+				bind(v,"TextColor3","Text")
+				return v
+			end
+			local gname=row(1,"Game",game.Name)
+			row(2,"Place ID",tostring(game.PlaceId))
+			row(3,"Job ID",game.JobId~="" and game.JobId or "Studio / lokal")
+			task.spawn(function() local ok,info=pcall(function() return MarketplaceService:GetProductInfo(game.PlaceId) end); if ok and info and info.Name then gname.Text=info.Name end end)
+			return ctl(c)
+		end
+		function Tab:AddFriendsOnline()
+			local para=Tab:AddParagraph("Teman di server","Memeriksa...")
+			local function refresh()
+				task.spawn(function()
+					local names={}
+					for _,p in ipairs(Players:GetPlayers()) do
+						if p~=plr then local ok,f=pcall(function() return plr:IsFriendsWith(p.UserId) end); if ok and f then names[#names+1]=p.DisplayName end end
+					end
+					if #names>0 then para:SetText(#names.." teman: "..table.concat(names,", "))
+					else para:SetText("Tidak ada teman di server ini") end
+				end)
+			end
+			refresh()
+			Players.PlayerAdded:Connect(refresh)
+			Players.PlayerRemoving:Connect(function() task.delay(0.5,refresh) end)
+			return para
+		end
+		function Tab:AddClock()
+			local c=card(92,"jam waktu clock tanggal","Jam Digital")
+			local function mk(color) return new("TextLabel",{Size=UDim2.new(1,0,0,48),Position=UDim2.new(0,0,0,8),BackgroundTransparency=1,Text="00:00:00",Font=Enum.Font.Code,TextSize=36,TextColor3=color},c) end
+			local red=mk(Color3.fromRGB(255,40,80)); red.TextTransparency=1; red.ZIndex=2
+			local cyan=mk(Color3.fromRGB(0,230,255)); cyan.TextTransparency=1; cyan.ZIndex=2
+			local face=mk(Theme.Text); face.ZIndex=3
+			bind(face,"TextColor3","Text")
+			face.TextStrokeTransparency=0.7; face.TextStrokeColor3=Theme.Accent
+			table.insert(refreshers,function() face.TextStrokeColor3=Theme.Accent end)
+			local date=new("TextLabel",{Size=UDim2.new(1,0,0,22),Position=UDim2.new(0,0,0,60),BackgroundTransparency=1,Text="",Font=Enum.Font.GothamMedium,TextSize=12},c)
+			bind(date,"TextColor3","Sub")
+			local scan=new("Frame",{Size=UDim2.new(1,-24,0,2),Position=UDim2.new(0,12,0,20),BackgroundColor3=Color3.new(1,1,1),BackgroundTransparency=1,BorderSizePixel=0,ZIndex=4},c)
+			local sym={"#","%","@","$","?","/","X","0","1"}
+			task.spawn(function()
+				while c.Parent do
+					local t=os.date("%H:%M:%S")
+					face.Text=t; red.Text=t; cyan.Text=t; date.Text=os.date("%A, %d %B %Y")
+					if math.random()<0.07 then
+						for _=1,math.random(3,6) do
+							local g={}
+							for ch in t:gmatch(".") do
+								if ch~=":" and math.random()<0.22 then g[#g+1]=sym[math.random(#sym)]
+								else g[#g+1]=ch end
+							end
+							face.Text=table.concat(g)
+							face.Position=UDim2.new(0,math.random(-2,2),0,8)
+							red.Position=UDim2.new(0,math.random(-7,-2),0,8+math.random(-2,2))
+							cyan.Position=UDim2.new(0,math.random(2,7),0,8+math.random(-2,2))
+							red.TextTransparency=0.25; cyan.TextTransparency=0.25
+							scan.Position=UDim2.new(0,12,0,math.random(8,50)); scan.BackgroundTransparency=0.6
+							task.wait(0.05)
+						end
+						face.Text=t; face.Position=UDim2.new(0,0,0,8)
+						red.Position=UDim2.new(0,0,0,8); cyan.Position=UDim2.new(0,0,0,8)
+						red.TextTransparency=1; cyan.TextTransparency=1; scan.BackgroundTransparency=1
+					end
+					task.wait(0.1)
+				end
+			end)
+			return ctl(c)
+		end
+		return Tab
+	end
+	function Window:Confirm(text,onYes,onNo)
+		local dim=new("TextButton",{Size=UDim2.new(1,0,1,0),BackgroundColor3=Color3.new(0,0,0),BackgroundTransparency=1,Text="",AutoButtonColor=false,ZIndex=30},main)
+		round(dim,16); tween(dim,0.2,{BackgroundTransparency=0.4})
+		local box=new("Frame",{Size=UDim2.fromOffset(250,120),AnchorPoint=Vector2.new(0.5,0.5),Position=UDim2.new(0.5,0,0.5,0)},dim)
+		bind(box,"BackgroundColor3","Card"); round(box,16)
+		local bs=new("UIStroke",{Thickness=1,Transparency=0.5},box); bind(bs,"Color","Line")
+		local sc=new("UIScale",{Scale=0.85},box); tween(sc,0.25,{Scale=1})
+		local t=new("TextLabel",{Size=UDim2.new(1,-28,0,60),Position=UDim2.new(0,14,0,8),BackgroundTransparency=1,Text=text,Font=Enum.Font.GothamMedium,TextSize=14,TextWrapped=true},box)
+		bind(t,"TextColor3","Text")
+		local function close(cb) tween(dim,0.15,{BackgroundTransparency=1}); tween(sc,0.15,{Scale=0.85}); task.delay(0.16,function() dim:Destroy() end); if cb then task.spawn(cb) end end
+		local no=new("TextButton",{Size=UDim2.new(0.5,-18,0,34),Position=UDim2.new(0,12,1,-46),Text="Batal",Font=Enum.Font.GothamBold,TextSize=13,AutoButtonColor=false},box)
+		bind(no,"BackgroundColor3","Bg"); bind(no,"TextColor3","Text"); round(no,10)
+		local yes=new("TextButton",{Size=UDim2.new(0.5,-18,0,34),Position=UDim2.new(0.5,6,1,-46),Text="Ya",Font=Enum.Font.GothamBold,TextSize=13,TextColor3=Color3.new(1,1,1),AutoButtonColor=false},box)
+		bind(yes,"BackgroundColor3","Accent"); round(yes,10)
+		no.MouseButton1Click:Connect(function() close(onNo) end)
+		yes.MouseButton1Click:Connect(function() close(onYes) end)
+	end
+	local liveToasts,TOAST_LIMIT={},5
+	local holder=new("Frame",{Size=UDim2.new(0,300,1,-20),Position=UDim2.new(1,-312,0,0),BackgroundTransparency=1},gui)
+	new("UIListLayout",{Padding=UDim.new(0,8),VerticalAlignment=Enum.VerticalAlignment.Bottom,SortOrder=Enum.SortOrder.LayoutOrder},holder)
+	local TOAST_BLUE_TOP=Color3.fromRGB(48,92,186)
+	local TOAST_BLUE_MID=Color3.fromRGB(28,58,130)
+	local TOAST_BLUE_LOW=Color3.fromRGB(16,32,76)
+	local TOAST_BLUE_STROKE=Color3.fromRGB(104,158,246)
+	local TOAST_TEXT_SUB=Color3.fromRGB(206,220,246)
+	function Window:Notify(text,kind,duration,opts)
+		if type(text)=="table" then opts=text; text=opts.body or opts.title or ""; kind=opts.kind; duration=opts.duration end
+		opts=opts or {}; kind=kind or opts.kind or "info"
+		local isLoading=opts.progress==true
+		duration=duration or opts.duration or (isLoading and math.huge or 3.5)
+		local kindColor=Theme.Accent; local label="Notifikasi"
+		if kind=="success" then kindColor=STATUS.Green; label="Berhasil"
+		elseif kind=="error" then kindColor=STATUS.Red; label="Kesalahan"
+		elseif kind=="warn" then kindColor=STATUS.Yellow; label="Peringatan" end
+		local titleText=opts.title or label
+		local bodyText=text
+		while #liveToasts>=TOAST_LIMIT do
+			local old=table.remove(liveToasts,1)
+			if old then if old.dismiss then old.dismiss() elseif old.wrap and old.wrap.Parent then old.wrap:Destroy() end end
+		end
+		local wrap=new("Frame",{Size=UDim2.new(1,0,0,0),BackgroundTransparency=1,ClipsDescendants=true},holder)
+		local box=new("Frame",{Size=UDim2.new(1,0,0,72),Position=UDim2.new(0,0,0,4),BackgroundColor3=Color3.new(1,1,1),ClipsDescendants=true},wrap)
+		round(box,14)
+		new("UIGradient",{Rotation=90,Color=ColorSequence.new({ColorSequenceKeypoint.new(0,TOAST_BLUE_TOP),ColorSequenceKeypoint.new(0.55,TOAST_BLUE_MID),ColorSequenceKeypoint.new(1,TOAST_BLUE_LOW)})},box)
+		local shine=new("Frame",{Size=UDim2.new(1,0,1,0),BackgroundColor3=Color3.new(1,1,1),BackgroundTransparency=0,BorderSizePixel=0},box)
+		round(shine,14)
+		local shineGrad=new("UIGradient",{Rotation=25,Transparency=NumberSequence.new({NumberSequenceKeypoint.new(0,1),NumberSequenceKeypoint.new(0.42,1),NumberSequenceKeypoint.new(0.5,0.72),NumberSequenceKeypoint.new(0.58,1),NumberSequenceKeypoint.new(1,1)}),Offset=Vector2.new(-1,0)},shine)
+		local bStroke=new("UIStroke",{Thickness=1,Transparency=0.45,Color=TOAST_BLUE_STROKE},box)
+		local glow=new("Frame",{Size=UDim2.fromOffset(40,40),Position=UDim2.new(0,16,0.5,-20),BackgroundColor3=kindColor,BackgroundTransparency=0.72,BorderSizePixel=0},box)
+		round(glow,20)
+		TweenService:Create(glow,TweenInfo.new(1.2,Enum.EasingStyle.Sine,Enum.EasingDirection.InOut,-1,true),{BackgroundTransparency=0.5}):Play()
+		local badge=new("Frame",{Size=UDim2.fromOffset(32,32),Position=UDim2.new(0,20,0.5,-16),BackgroundColor3=kindColor,BackgroundTransparency=0.1,BorderSizePixel=0},box)
+		round(badge,16)
+		local badgeInner=nil
+		do
+			local icon=opts.icon
+			if type(icon)=="table" and icon.drawn and DrawnIcons[icon.drawn] then
+				badgeInner=new("Frame",{Size=UDim2.fromOffset(18,18),Position=UDim2.new(0.5,-9,0.5,-9),BackgroundTransparency=1},badge)
+				new("UIScale",{Scale=1.1},badgeInner)
+				DrawnIcons[icon.drawn](badgeInner)
+				for _,d in ipairs(badgeInner:GetDescendants()) do
+					if d:IsA("Frame") and d:GetAttribute("IconInk") then d.BackgroundColor3=Color3.new(1,1,1)
+					elseif d:IsA("Frame") and d:GetAttribute("IconCutout") then d.BackgroundColor3=kindColor end
+				end
+			else
+				local img=icon
+				if type(img)=="number" then img="rbxassetid://"..img end
+				img=img or LOGO_IMAGE
+				local bi=new("ImageLabel",{Size=UDim2.new(1,-4,1,-4),Position=UDim2.new(0.5,0,0.5,0),AnchorPoint=Vector2.new(0.5,0.5),BackgroundTransparency=1,Image=img,ScaleType=Enum.ScaleType.Crop},badge)
+				round(bi,14)
+			end
+		end
+		local function recolorBadge(newColor)
+			badge.BackgroundColor3=newColor; glow.BackgroundColor3=newColor
+			if badgeInner then
+				for _,d in ipairs(badgeInner:GetDescendants()) do
+					if d:IsA("Frame") and d:GetAttribute("IconCutout") then d.BackgroundColor3=newColor end
+				end
+			end
+		end
+		local close=new("TextButton",{Size=UDim2.fromOffset(20,20),Position=UDim2.new(1,-26,0,8),BackgroundTransparency=1,Text="",AutoButtonColor=false},box)
+		for _,rot in ipairs({45,-45}) do
+			local bar=new("Frame",{Size=UDim2.fromOffset(10,1.5),Position=UDim2.new(0.5,-5,0.5,-0.75),BorderSizePixel=0,Rotation=rot,BackgroundColor3=Color3.fromRGB(180,208,245)},close)
+			round(bar,1)
+		end
+		local title=new("TextLabel",{Size=UDim2.new(1,-110,0,18),Position=UDim2.new(0,64,0,12),BackgroundTransparency=1,Text=titleText,Font=Enum.Font.GothamBold,TextSize=13,TextColor3=Color3.new(1,1,1),TextXAlignment=Enum.TextXAlignment.Left,TextTruncate=Enum.TextTruncate.AtEnd},box)
+		local body=new("TextLabel",{Size=UDim2.new(1,-76,0,26),Position=UDim2.new(0,64,0,32),BackgroundTransparency=1,Text=bodyText,Font=Enum.Font.Gotham,TextSize=12,TextWrapped=true,TextColor3=TOAST_TEXT_SUB,TextXAlignment=Enum.TextXAlignment.Left,TextYAlignment=Enum.TextYAlignment.Top},box)
+		local track=new("Frame",{Size=UDim2.new(1,-24,0,3),Position=UDim2.new(0,12,1,-9),BackgroundColor3=kindColor,BackgroundTransparency=0.65,BorderSizePixel=0},box)
+		round(track,1.5)
+		local fill=new("Frame",{Size=UDim2.new(1,0,1,0),BackgroundColor3=kindColor},track)
+		round(fill,1.5)
+		local indetTween=nil
+		if isLoading then
+			fill.Size=UDim2.new(0,0,1,0)
+			indetTween=TweenService:Create(fill,TweenInfo.new(1.2,Enum.EasingStyle.Sine,Enum.EasingDirection.InOut,-1,true),{Size=UDim2.new(1,0,1,0)})
+			indetTween:Play()
+		else
+			TweenService:Create(fill,TweenInfo.new(duration,Enum.EasingStyle.Linear),{Size=UDim2.new(0,0,1,0)}):Play()
+		end
+		local sc=new("UIScale",{Scale=0.85},box)
+		box.BackgroundTransparency=1; bStroke.Transparency=1
+		tween(wrap,0.3,{Size=UDim2.new(1,0,0,80)})
+		tween(sc,0.35,{Scale=1})
+		tween(box,0.25,{BackgroundTransparency=0})
+		tween(bStroke,0.3,{Transparency=0.45})
+		task.spawn(function()
+			task.wait(0.6)
+			while wrap.Parent do
+				shineGrad.Offset=Vector2.new(-1,0)
+				TweenService:Create(shineGrad,TweenInfo.new(1.6,Enum.EasingStyle.Quad,Enum.EasingDirection.InOut),{Offset=Vector2.new(1,0)}):Play()
+				task.wait(1.6+3.4)
+			end
+		end)
+		local toast={wrap=wrap}; table.insert(liveToasts,toast)
+		local dismissed=false
+		local function dismiss()
+			if dismissed then return end; dismissed=true
+			if indetTween then indetTween:Cancel(); indetTween=nil end
+			tween(wrap,0.28,{Size=UDim2.new(1,0,0,0)})
+			tween(sc,0.25,{Scale=0.85})
+			tween(box,0.22,{BackgroundTransparency=1})
+			tween(bStroke,0.22,{Transparency=1})
+			for i=#liveToasts,1,-1 do if liveToasts[i]==toast then table.remove(liveToasts,i); break end end
+			task.delay(0.32,function() if wrap and wrap.Parent then wrap:Destroy() end end)
+		end
+		toast.dismiss=dismiss
+		close.MouseButton1Click:Connect(dismiss)
+		if not isLoading then task.delay(duration,dismiss) end
+		if opts.sound then
+			pcall(function()
+				local s=new("Sound",{SoundId=opts.sound,Volume=opts.volume or 0.4},gui)
+				s:Play(); s.Ended:Connect(function() s:Destroy() end)
+			end)
+		end
+		local api={
+			Dismiss=dismiss,
+			SetTitle=function(_,s) title.Text=s end,
+			SetText=function(_,s) body.Text=s end,
+			SetProgress=function(_,p)
+				if dismissed then return end
+				if indetTween then indetTween:Cancel(); indetTween=nil end
+				fill.Size=UDim2.new(math.clamp(p,0,1),0,1,0)
+			end,
+			Finish=function(_,ok,msg)
+				if dismissed then return end
+				if indetTween then indetTween:Cancel(); indetTween=nil end
+				fill.Size=UDim2.new(1,0,1,0)
+				if ok==false then
+					recolorBadge(STATUS.Red); track.BackgroundColor3=STATUS.Red; fill.BackgroundColor3=STATUS.Red
+					title.Text=msg or (titleText.." gagal")
+				else
+					recolorBadge(STATUS.Green); track.BackgroundColor3=STATUS.Green; fill.BackgroundColor3=STATUS.Green
+					if msg then title.Text=msg end
+				end
+				task.delay(1.2,dismiss)
+			end
+		}
+		return api
+	end
+	function Window:SetTheme(n) if Themes[n] then for k,v in pairs(Themes[n]) do Theme[k]=v end; applyTheme() end end
+	function Window:SetAccent(c) Theme.Accent=c; applyTheme() end
+	function Window:SetOverlay(t) tween(overlay,0.25,{BackgroundTransparency=math.clamp(t,0,1)}) end
+	function Window:SetScale(s) tween(uiScale,0.25,{Scale=s}) end
+	function Window:SetHud(on) hudEnabled=on and true or false; updateHud() end
+	function Window:SetSidebarCollapsed(on) setCollapsed(on) end
+	function Window:OpenPalette() openPalette() end
+	function Window:Toggle() setOpen(not open) end
+	function Window:Destroy() gui:Destroy() end
+	return Window
+end
+
+-- ═══════════════════════════════════════════════════════════
+-- PART 3: MENU
+-- ═══════════════════════════════════════════════════════════
+local LocalPlayer = Players.LocalPlayer
+local Win = Lib:CreateWindow()
+
+-- TAB: RUMAH 🏠 (NEW UI)
+local home = Win:AddTab("Rumah", {drawn = "home"})
+home:AddGreeting()
+home:AddSection("Profil")
+home:AddProfile()
+home:AddSection("Performa")
+home:AddGraph("FPS", function() return Win:GetFPS() end, 75, " fps", false)
+home:AddGraph("Ping", function() return Win:GetPing() end, 300, " ms", true)
+home:AddStats()
+home:AddSection("Game")
+home:AddGameInfo()
+home:AddSection("Sosial")
+home:AddFriendsOnline()
+home:AddSection("Jam")
+home:AddClock()
+home:AddSection("Tampilan")
+home:AddDropdown("Tema", {"Midnight", "Rose", "Emerald", "Gold", "Light"}, "Midnight", function(v) Win:SetTheme(v) end)
+home:AddSlider("Kecerahan BG", 0, 100, 88, function(v) Win:SetOverlay(v / 100) end)
+local SCALES = {Kecil = 0.85, Sedang = 1, Besar = 1.15}
+home:AddDropdown("Skala UI", {"Kecil", "Sedang", "Besar"}, "Sedang", function(v) Win:SetScale(SCALES[v]) end)
+home:AddToggle("HUD Mini FPS/Ping", true, function(v) Win:SetHud(v) end):SetTooltip("Muncul saat jendela ditutup, bisa digeser")
+home:AddToggle("Sidebar Ringkas", false, function(v) Win:SetSidebarCollapsed(v) end)
+home:AddButton("Command Palette (Ctrl+K)", function() Win:OpenPalette() end)
+home:AddSection("Pengumuman")
+home:AddParagraph("Yoruka.id", "Buka/tutup: logo bulat atau RightShift.\nCommand palette: Ctrl+K atau tombol cari di topbar.\nTarik pojok kanan bawah jendela untuk mengubah ukuran.")
+home:AddSection("Aksi")
+home:AddButton(G.refresh .. " Rejoin Server", function()
+	local ok = pcall(function() TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, LocalPlayer) end)
+	if not ok then Win:Notify("Rejoin gagal (tidak bisa di Studio)", "error") end
+end, "Keluar dan masuk lagi ke server ini?")
+
+-- TAB: FARM TASK 💀
+local farmTask = Win:AddTab("FARM TASK", utf8.char(128128))
+task.spawn(function()
+	local API = getgenv().MorgueAPI
+	if not API then for _=1,20 do task.wait(0.3); API=getgenv().MorgueAPI; if API then break end end end
+	if not API then Win:Notify("Morgue engine tidak ditemukan!", "error", 5); return end
+
+	farmTask:AddSection("Auto Farm")
+	local tFarm = farmTask:AddToggle("Auto Farm Shift", API.IsAutoFarm(), function(v) API.SetAutoFarm(v) end)
+	local tSolo = farmTask:AddToggle("Auto Start Solo", API.IsAutoStartSolo(), function(v) API.SetAutoStartSolo(v) end)
+	local tMini = farmTask:AddToggle("Minigame Solver", API.IsAutoMinigame(), function(v) API.SetAutoMinigame(v) end)
+
+	farmTask:AddSection("Movement")
+	local tNoclip = farmTask:AddToggle("Noclip", API.IsNoclip(), function(v) API.SetNoclip(v) end)
+	local tTween = farmTask:AddToggle("Tween Mode (Slow)", API.IsTweenMode(), function(v) API.SetTweenMode(v) end)
+
+	farmTask:AddSection("Status")
+	local statPara = farmTask:AddParagraph("Status", "Ready")
+	local statsPara = farmTask:AddParagraph("Stats", "Shifts: 0 | Mini: 0 | JS: 0 | Calls: 0")
+
+	farmTask:AddSection("Kontrol")
+	farmTask:AddButton("Reset Shift Latched", function() API.ResetShiftLatched(); Win:Notify("Reset","success",2) end)
+	farmTask:AddButton("Unload Engine", function() if API.Unload then API.Unload() end; Win:Notify("Engine unloaded","warn",3) end, "Yakin unload engine?")
+
+	task.spawn(function() while task.wait(0.6) do
+		if not getgenv().MorgueAPI then if statPara and statPara.SetText then statPara:SetText("Engine offline") end; break end
+		local ok, msg = pcall(function() local m,p = API.GetStatus(); return m.."  ["..p.."]" end)
+		local okS, st = pcall(function() return API.GetStats() end)
+		if ok and statPara and statPara.SetText then statPara:SetText(msg) end
+		if okS and statsPara and statsPara.SetText then statsPara:SetText(string.format("Shifts: %d | Mini: %d | JS: %d | Calls: %d", st.ShiftsCompleted, st.MinigamesSolved, st.JumpscaresCleared, st.CallsHandled)) end
+		if tFarm and tFarm.Set then pcall(function() tFarm:Set(API.IsAutoFarm(),true) end) end
+		if tSolo and tSolo.Set then pcall(function() tSolo:Set(API.IsAutoStartSolo(),true) end) end
+		if tMini and tMini.Set then pcall(function() tMini:Set(API.IsAutoMinigame(),true) end) end
+		if tNoclip and tNoclip.Set then pcall(function() tNoclip:Set(API.IsNoclip(),true) end) end
+		if tTween and tTween.Set then pcall(function() tTween:Set(API.IsTweenMode(),true) end) end
+	end end)
+	Win:Notify("FARM TASK loaded", "success", 3)
+end)
+
+-- TAB: COLLECT 🍬
+local coll = Win:AddTab("Collect", utf8.char(127852))
+coll:AddSection("Candy")
+coll:AddToggle("Auto Collect Candy", false, function(v) OC.AutoCollectCandy=v end)
+coll:AddDropdown("Candy Method", {"walk","path"}, "walk", function(v) OC.CandyMethod=v end)
+coll:AddSlider("Candy Interval", 1, 10, 2, function(v) OC.CandyInterval=v end)
+coll:AddSection("Pumpkin")
+coll:AddToggle("Auto Collect Pumpkin", false, function(v) OC.AutoCollectPumpkin=v end)
+coll:AddDropdown("Pumpkin Method", {"walk","path"}, "walk", function(v) OC.PumpkinMethod=v end)
+coll:AddSlider("Pumpkin Interval", 1, 10, 2, function(v) OC.PumpkinInterval=v end)
+coll:AddSection("Prompt Bypass")
+coll:AddDropdown("Bypass Method", {"Simulate","Alternative","Aggressive"}, "Simulate", function(v) OC.PromptBypass=v end)
+local collectStats = coll:AddParagraph("Collected", "Candy: 0 | Pumpkin: 0")
+task.spawn(function() while task.wait(1) do
+	if collectStats then local s=OC.Stats; pcall(function() collectStats:SetText(string.format("Candy: %d/%d | Pumpkin: %d/%d", s.ItemsCollected, s.ItemsFound, s.PumpkinsCollected, s.PumpkinsFound)) end) end
+end end)
+
+-- TAB: ESP 👁
+local esp = Win:AddTab("ESP", {drawn = "eye"})
+esp:AddSection("Visual")
+esp:AddToggle("Item ESP", false, function(v) OC.ItemESP=v end)
+esp:AddToggle("Pumpkin ESP", false, function(v) OC.PumpkinESP=v end)
+esp:AddToggle("Reaper ESP", false, function(v) OC.ReaperESP=v end)
+esp:AddToggle("Ghost ESP", false, function(v) OC.GhostESP=v end)
+esp:AddToggle("Show Distance", false, function(v) OC.ShowDistance=v end)
+local espInfo = esp:AddParagraph("Entities", "Items: 0 | Pumpkins: 0 | Reapers: 0 | Ghosts: 0")
+task.spawn(function() while task.wait(1) do
+	if espInfo then local s=OC.Stats; pcall(function() espInfo:SetText(string.format("Items: %d | Pumpkins: %d | Reapers: %d | Ghosts: %d", s.ItemsFound, s.PumpkinsFound, s.ReapersFound, s.GhostsFound)) end) end
+end end)
+
+-- TAB: MOVEMENT 🏃
+local move = Win:AddTab("Movement", utf8.char(127939))
+move:AddSection("Fly")
+move:AddToggle("Fly Mode", false, function(v) OC.Fly=v end)
+move:AddSlider("Fly Speed", 20, 200, 80, function(v) OC.FlySpeed=v end)
+move:AddSection("Jump")
+move:AddToggle("Infinite Jump", false, function(v) OC.InfiniteJump=v end)
+move:AddSection("Speed")
+move:AddToggle("Speedhack", false, function(v) OC.SpeedhackEnabled=v end)
+move:AddSlider("Speedhack Value", 16, 200, 60, function(v) OC.SpeedhackValue=v end)
+move:AddToggle("Speedhack Anti-Detect", true, function(v) OC.SpeedhackAntiDetect=v end)
+move:AddSection("Other")
+move:AddToggle("WalkSpeed Override", false, function(v) OC.WalkSpeedEnabled=v end)
+move:AddSlider("WalkSpeed Value", 8, 100, 16, function(v) OC.WalkSpeedValue=v end)
+move:AddToggle("Invisible", false, function(v) OC.Invisible=v end)
+move:AddToggle("Godmode", false, function(v) OC.GodMode=v end)
+
+-- TAB: ANTI 🛡
+local anti = Win:AddTab("Anti", {drawn = "shield"})
+anti:AddSection("Protection")
+anti:AddToggle("Anti-AFK", true, function(v) OC.AntiAFK=v end)
+anti:AddSlider("Anti-AFK Interval", 30, 180, 90, function(v) OC.AntiAFKInterval=v end)
+anti:AddToggle("Anti-Detect", true, function(v) OC.AntiDetect=v; antiDetect.Enabled=v end)
+anti:AddToggle("Anti-Fling", true, function(v) OC.AntiFling=v end)
+anti:AddToggle("Anti-Void", true, function(v) OC.AntiVoid=v end)
+anti:AddToggle("Auto Respawn", true, function(v) OC.AutoRespawn=v end)
+local antiStats = anti:AddParagraph("Blocked", "Kicks: 0 | Remotes: 0 | Movement: 0")
+task.spawn(function() while task.wait(1) do
+	if antiStats then pcall(function() antiStats:SetText(string.format("Kicks: %d | Remotes: %d | Movement: %d", antiDetect.KicksBlocked, antiDetect.RemotesBlocked, antiDetect.MovementBlocked)) end) end
+end end)
+
+-- TAB: TOOLS 🔧
+local qol = Win:AddTab("Tools", utf8.char(128295))
+qol:AddSection("Lighting")
+qol:AddToggle("Fullbright", false, function(v) OC.Fullbright=v end)
+qol:AddToggle("No Fog", false, function(v) OC.NoFog=v end)
+qol:AddToggle("FPS Unlocker", false, function(v) OC.FPSUnlock=v end)
+qol:AddSection("Server")
+qol:AddButton(G.refresh .. " Server Hop", function()
+	Win:Notify("Server hopping...","warn",2)
+	if OC.ServerHop then OC.ServerHop() end
+end, "Pindah server random?")
+qol:AddButton(G.refresh .. " Rejoin Server", function()
+	pcall(function() TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, LocalPlayer) end)
+end, "Rejoin server saat ini?")
+
+-- TAB: SETTINGS ⚙
+local settings = Win:AddTab("Settings", {drawn = "gear"})
+settings:AddSection("Kontrol")
+settings:AddParagraph("Info", "Toggle UI: RightShift\nKlik logo 👻 untuk toggle\nCtrl+K untuk Command Palette\nDrag logo untuk pindah posisi")
+settings:AddSection("Danger Zone")
+settings:AddButton("Unload Semua", function()
+	Win:Notify("Unloading...","warn",2); task.wait(0.5)
+	local api = getgenv().MorgueAPI
+	if api and api.Unload then pcall(api.Unload) end
+	if OC and OC.Unload then pcall(OC.Unload) end
+end, "Yakin unload semua engine?")
+
+print("[MEGA FINAL v8.3] ✅ Loaded! 8 tabs: Rumah (new UI) | FARM TASK 💀 | Collect 🍬 | ESP 👁 | Movement 🏃 | Anti 🛡 | Tools 🔧 | Settings ⚙")
