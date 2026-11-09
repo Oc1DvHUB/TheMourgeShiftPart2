@@ -1,11 +1,8 @@
 -- ============================================================
--- MEGA FINAL: Morgue + OC1DvHUB Engines + New UI v8.3
--- Rumah = NEW UI version | FARM TASK, Collect, ESP, Movement, Anti, Tools, Settings = dari versi lama
+-- MEGA FINAL v8.4: Morgue + OC1DvHUB + New UI
+-- FIX: Noclip support di ocWalk + Toggle di tab Collect
 -- ============================================================
 
--- ═══════════════════════════════════════════════════════════
--- PART 1: MORGUE ENGINE
--- ═══════════════════════════════════════════════════════════
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
@@ -977,7 +974,7 @@ setStatus("Engine loaded.",{Phase="lifecycle"})
 print("[MorgueEngine] Loaded.")
 
 -- ═══════════════════════════════════════════════════════════
--- PART 1.5: OC1DVHUB ENGINE
+-- PART 1.5: OC1DVHUB ENGINE (dengan FIX noclip di ocWalk)
 -- ═══════════════════════════════════════════════════════════
 local OC = {
 	AutoCollectCandy=false, AutoCollectPumpkin=false,
@@ -1199,6 +1196,7 @@ local function refreshCache() if tick()-scanCache.lastUpdate>0.8 then scanCache.
 local function getCI() refreshCache(); return scanCache.items end
 local function getCP() refreshCache(); return scanCache.pumpkins end
 
+-- ✅ FIXED ocWalk: support noclip direct move
 local function ocWalk(tp,timeout,speed)
 	timeout=timeout or 120; speed=speed or 32
 	if not hasChar() or not tp or not tp.Parent then return false end
@@ -1206,6 +1204,42 @@ local function ocWalk(tp,timeout,speed)
 	local os_=hum.WalkSpeed; hum.WalkSpeed=speed
 	local success,st=false,tick()
 	if (hrp.Position-tp.Position).Magnitude<5 then hum.WalkSpeed=os_; return true end
+
+	-- === NOCLIP MODE: direct move, no pathfinding ===
+	local isNoclip = (State and State.Noclip) or OC.Invisible or OC.Fly
+	if isNoclip then
+		local char=localPlayer.Character
+		if char then
+			for _,d in ipairs(char:GetDescendants()) do
+				if d:IsA("BasePart") and d.CanCollide then d.CanCollide=false end
+			end
+		end
+		local lastPos=hrp.Position; local stuckT=0
+		while tick()-st<timeout do
+			if not hasChar() or not tp.Parent then break end
+			local c,h,r=localPlayer.Character,getHum(),getHRP()
+			if not (c and h and r) then break end
+			if h.Health<=0 then break end
+			if (r.Position-tp.Position).Magnitude<=5 then success=true; break end
+			local dir = tp.Position - r.Position
+			if dir.Magnitude>0.1 then h:Move(dir.Unit) end
+			if (r.Position-lastPos).Magnitude<0.3 then
+				stuckT+=0.1
+				if stuckT>1 then h.Jump=true; stuckT=0 end
+			else stuckT=0 end
+			lastPos=r.Position
+			for _,d in ipairs(c:GetDescendants()) do
+				if d:IsA("BasePart") and d.CanCollide then d.CanCollide=false end
+			end
+			task.wait(0.05)
+		end
+		if hum then pcall(function() hum:Move(Vector3.zero) end) end
+		hum.WalkSpeed=os_
+		return success
+	end
+	-- === END NOCLIP MODE ===
+
+	-- Mode normal: pakai PathfindingService
 	local path=PathfindingService:CreatePath({AgentRadius=2,AgentHeight=5,AgentCanJump=true,AgentCanClimb=true,WaypointSpacing=8})
 	local ok=pcall(function() path:ComputeAsync(hrp.Position,tp.Position) end)
 	if ok and path.Status==Enum.PathStatus.Success then
@@ -1247,6 +1281,7 @@ local function ocWalk(tp,timeout,speed)
 	if hasChar() then pcall(function() hum:MoveTo(getHRP().Position) end) end
 	hum.WalkSpeed=os_; return success
 end
+
 local function collectItem(data)
 	if not data or not data.part or not data.part.Parent then return false end
 	local part,model=data.part,data.model; local hrp=getHRP(); if not hrp then return false end
@@ -1419,10 +1454,10 @@ OC.Unload=function()
 	if env.Oc1DvHUB==OC then env.Oc1DvHUB=nil end
 end
 env.Oc1DvHUB = OC
-print("[Oc1DvHUB] Engine loaded.")
+print("[Oc1DvHUB] Engine loaded (noclip-aware walk).")
 
 -- ═══════════════════════════════════════════════════════════
--- PART 2: NEW UI LIBRARY v8.3 (dari user)
+-- PART 2: NEW UI LIBRARY v8.3
 -- ═══════════════════════════════════════════════════════════
 local G = {down="v",search=utf8.char(128269),wave=utf8.char(128075),home=utf8.char(127968),refresh=utf8.char(128260)}
 local Lib = {}
@@ -1881,23 +1916,6 @@ function Lib:CreateWindow(title,opts)
 			h.MouseButton1Click:Connect(function() toggle(not isOpen) end)
 			return ctl(c,{Set=function(_,v,silent) set(v,silent) end,Get=function() return cur end})
 		end
-		function Tab:AddKeybind(text,default,cb,onChange)
-			local key=default or Enum.KeyCode.F; local listening=false; local c=card(42,text,text); lbl(c,text)
-			local b=new("TextButton",{Size=UDim2.new(0,90,0,26),Position=UDim2.new(1,-102,0,8),Text=key.Name,Font=Enum.Font.GothamBold,TextSize=12,AutoButtonColor=false},c)
-			bind(b,"BackgroundColor3","Bg"); bind(b,"TextColor3","Accent"); round(b,8)
-			b.MouseButton1Click:Connect(function() listening=true; b.Text="..." end)
-			local function set(k) key=k; b.Text=key.Name; if onChange then task.spawn(onChange,key) end end
-			UIS.InputBegan:Connect(function(i,gp)
-				if listening then
-					if i.UserInputType==Enum.UserInputType.Keyboard then
-						listening=false
-						if i.KeyCode==Enum.KeyCode.Escape then b.Text=key.Name else set(i.KeyCode) end
-					end
-				elseif not gp and i.KeyCode==key and cb then task.spawn(cb,key) end
-			end)
-			return ctl(c,{Get=function() return key end})
-		end
-		-- Home komponen (dipakai tab Rumah baru)
 		function Tab:AddGreeting()
 			local c=card(58,"sapaan selamat datang","Sapaan")
 			local a=new("TextLabel",{Size=UDim2.new(1,-28,0,28),Position=UDim2.new(0,14,0,6),BackgroundTransparency=1,Font=Enum.Font.GothamBold,TextSize=17,TextXAlignment=Enum.TextXAlignment.Left,TextTruncate=Enum.TextTruncate.AtEnd},c)
@@ -2104,42 +2122,9 @@ function Lib:CreateWindow(title,opts)
 		local box=new("Frame",{Size=UDim2.new(1,0,0,72),Position=UDim2.new(0,0,0,4),BackgroundColor3=Color3.new(1,1,1),ClipsDescendants=true},wrap)
 		round(box,14)
 		new("UIGradient",{Rotation=90,Color=ColorSequence.new({ColorSequenceKeypoint.new(0,TOAST_BLUE_TOP),ColorSequenceKeypoint.new(0.55,TOAST_BLUE_MID),ColorSequenceKeypoint.new(1,TOAST_BLUE_LOW)})},box)
-		local shine=new("Frame",{Size=UDim2.new(1,0,1,0),BackgroundColor3=Color3.new(1,1,1),BackgroundTransparency=0,BorderSizePixel=0},box)
-		round(shine,14)
-		local shineGrad=new("UIGradient",{Rotation=25,Transparency=NumberSequence.new({NumberSequenceKeypoint.new(0,1),NumberSequenceKeypoint.new(0.42,1),NumberSequenceKeypoint.new(0.5,0.72),NumberSequenceKeypoint.new(0.58,1),NumberSequenceKeypoint.new(1,1)}),Offset=Vector2.new(-1,0)},shine)
 		local bStroke=new("UIStroke",{Thickness=1,Transparency=0.45,Color=TOAST_BLUE_STROKE},box)
-		local glow=new("Frame",{Size=UDim2.fromOffset(40,40),Position=UDim2.new(0,16,0.5,-20),BackgroundColor3=kindColor,BackgroundTransparency=0.72,BorderSizePixel=0},box)
-		round(glow,20)
-		TweenService:Create(glow,TweenInfo.new(1.2,Enum.EasingStyle.Sine,Enum.EasingDirection.InOut,-1,true),{BackgroundTransparency=0.5}):Play()
 		local badge=new("Frame",{Size=UDim2.fromOffset(32,32),Position=UDim2.new(0,20,0.5,-16),BackgroundColor3=kindColor,BackgroundTransparency=0.1,BorderSizePixel=0},box)
 		round(badge,16)
-		local badgeInner=nil
-		do
-			local icon=opts.icon
-			if type(icon)=="table" and icon.drawn and DrawnIcons[icon.drawn] then
-				badgeInner=new("Frame",{Size=UDim2.fromOffset(18,18),Position=UDim2.new(0.5,-9,0.5,-9),BackgroundTransparency=1},badge)
-				new("UIScale",{Scale=1.1},badgeInner)
-				DrawnIcons[icon.drawn](badgeInner)
-				for _,d in ipairs(badgeInner:GetDescendants()) do
-					if d:IsA("Frame") and d:GetAttribute("IconInk") then d.BackgroundColor3=Color3.new(1,1,1)
-					elseif d:IsA("Frame") and d:GetAttribute("IconCutout") then d.BackgroundColor3=kindColor end
-				end
-			else
-				local img=icon
-				if type(img)=="number" then img="rbxassetid://"..img end
-				img=img or LOGO_IMAGE
-				local bi=new("ImageLabel",{Size=UDim2.new(1,-4,1,-4),Position=UDim2.new(0.5,0,0.5,0),AnchorPoint=Vector2.new(0.5,0.5),BackgroundTransparency=1,Image=img,ScaleType=Enum.ScaleType.Crop},badge)
-				round(bi,14)
-			end
-		end
-		local function recolorBadge(newColor)
-			badge.BackgroundColor3=newColor; glow.BackgroundColor3=newColor
-			if badgeInner then
-				for _,d in ipairs(badgeInner:GetDescendants()) do
-					if d:IsA("Frame") and d:GetAttribute("IconCutout") then d.BackgroundColor3=newColor end
-				end
-			end
-		end
 		local close=new("TextButton",{Size=UDim2.fromOffset(20,20),Position=UDim2.new(1,-26,0,8),BackgroundTransparency=1,Text="",AutoButtonColor=false},box)
 		for _,rot in ipairs({45,-45}) do
 			local bar=new("Frame",{Size=UDim2.fromOffset(10,1.5),Position=UDim2.new(0.5,-5,0.5,-0.75),BorderSizePixel=0,Rotation=rot,BackgroundColor3=Color3.fromRGB(180,208,245)},close)
@@ -2165,14 +2150,6 @@ function Lib:CreateWindow(title,opts)
 		tween(sc,0.35,{Scale=1})
 		tween(box,0.25,{BackgroundTransparency=0})
 		tween(bStroke,0.3,{Transparency=0.45})
-		task.spawn(function()
-			task.wait(0.6)
-			while wrap.Parent do
-				shineGrad.Offset=Vector2.new(-1,0)
-				TweenService:Create(shineGrad,TweenInfo.new(1.6,Enum.EasingStyle.Quad,Enum.EasingDirection.InOut),{Offset=Vector2.new(1,0)}):Play()
-				task.wait(1.6+3.4)
-			end
-		end)
 		local toast={wrap=wrap}; table.insert(liveToasts,toast)
 		local dismissed=false
 		local function dismiss()
@@ -2188,32 +2165,17 @@ function Lib:CreateWindow(title,opts)
 		toast.dismiss=dismiss
 		close.MouseButton1Click:Connect(dismiss)
 		if not isLoading then task.delay(duration,dismiss) end
-		if opts.sound then
-			pcall(function()
-				local s=new("Sound",{SoundId=opts.sound,Volume=opts.volume or 0.4},gui)
-				s:Play(); s.Ended:Connect(function() s:Destroy() end)
-			end)
-		end
 		local api={
 			Dismiss=dismiss,
 			SetTitle=function(_,s) title.Text=s end,
 			SetText=function(_,s) body.Text=s end,
-			SetProgress=function(_,p)
-				if dismissed then return end
-				if indetTween then indetTween:Cancel(); indetTween=nil end
-				fill.Size=UDim2.new(math.clamp(p,0,1),0,1,0)
-			end,
+			SetProgress=function(_,p) if dismissed then return end; if indetTween then indetTween:Cancel(); indetTween=nil end; fill.Size=UDim2.new(math.clamp(p,0,1),0,1,0) end,
 			Finish=function(_,ok,msg)
 				if dismissed then return end
 				if indetTween then indetTween:Cancel(); indetTween=nil end
 				fill.Size=UDim2.new(1,0,1,0)
-				if ok==false then
-					recolorBadge(STATUS.Red); track.BackgroundColor3=STATUS.Red; fill.BackgroundColor3=STATUS.Red
-					title.Text=msg or (titleText.." gagal")
-				else
-					recolorBadge(STATUS.Green); track.BackgroundColor3=STATUS.Green; fill.BackgroundColor3=STATUS.Green
-					if msg then title.Text=msg end
-				end
+				if ok==false then badge.BackgroundColor3=STATUS.Red; track.BackgroundColor3=STATUS.Red; fill.BackgroundColor3=STATUS.Red; title.Text=msg or (titleText.." gagal")
+				else badge.BackgroundColor3=STATUS.Green; track.BackgroundColor3=STATUS.Green; fill.BackgroundColor3=STATUS.Green; if msg then title.Text=msg end end
 				task.delay(1.2,dismiss)
 			end
 		}
@@ -2232,12 +2194,12 @@ function Lib:CreateWindow(title,opts)
 end
 
 -- ═══════════════════════════════════════════════════════════
--- PART 3: MENU
+-- PART 3: MENU — 8 TABS
 -- ═══════════════════════════════════════════════════════════
 local LocalPlayer = Players.LocalPlayer
 local Win = Lib:CreateWindow()
 
--- TAB: RUMAH 🏠 (NEW UI)
+-- TAB: RUMAH 🏠
 local home = Win:AddTab("Rumah", {drawn = "home"})
 home:AddGreeting()
 home:AddSection("Profil")
@@ -2265,8 +2227,12 @@ home:AddParagraph("Yoruka.id", "Buka/tutup: logo bulat atau RightShift.\nCommand
 home:AddSection("Aksi")
 home:AddButton(G.refresh .. " Rejoin Server", function()
 	local ok = pcall(function() TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, LocalPlayer) end)
-	if not ok then Win:Notify("Rejoin gagal (tidak bisa di Studio)", "error") end
+	if not ok then Win:Notify("Rejoin gagal", "error") end
 end, "Keluar dan masuk lagi ke server ini?")
+
+-- ✅ SHARED VARIABLES untuk sync antar tab
+local tNoclipColl, tNoclipFarm
+local tFarm, tSolo, tMini, tTween
 
 -- TAB: FARM TASK 💀
 local farmTask = Win:AddTab("FARM TASK", utf8.char(128128))
@@ -2276,13 +2242,16 @@ task.spawn(function()
 	if not API then Win:Notify("Morgue engine tidak ditemukan!", "error", 5); return end
 
 	farmTask:AddSection("Auto Farm")
-	local tFarm = farmTask:AddToggle("Auto Farm Shift", API.IsAutoFarm(), function(v) API.SetAutoFarm(v) end)
-	local tSolo = farmTask:AddToggle("Auto Start Solo", API.IsAutoStartSolo(), function(v) API.SetAutoStartSolo(v) end)
-	local tMini = farmTask:AddToggle("Minigame Solver", API.IsAutoMinigame(), function(v) API.SetAutoMinigame(v) end)
+	tFarm = farmTask:AddToggle("Auto Farm Shift", API.IsAutoFarm(), function(v) API.SetAutoFarm(v) end)
+	tSolo = farmTask:AddToggle("Auto Start Solo", API.IsAutoStartSolo(), function(v) API.SetAutoStartSolo(v) end)
+	tMini = farmTask:AddToggle("Minigame Solver", API.IsAutoMinigame(), function(v) API.SetAutoMinigame(v) end)
 
 	farmTask:AddSection("Movement")
-	local tNoclip = farmTask:AddToggle("Noclip", API.IsNoclip(), function(v) API.SetNoclip(v) end)
-	local tTween = farmTask:AddToggle("Tween Mode (Slow)", API.IsTweenMode(), function(v) API.SetTweenMode(v) end)
+	tNoclipFarm = farmTask:AddToggle("Noclip", API.IsNoclip(), function(v)
+		API.SetNoclip(v)
+		if tNoclipColl and tNoclipColl.Set then pcall(function() tNoclipColl:Set(v, true) end) end
+	end)
+	tTween = farmTask:AddToggle("Tween Mode (Slow)", API.IsTweenMode(), function(v) API.SetTweenMode(v) end)
 
 	farmTask:AddSection("Status")
 	local statPara = farmTask:AddParagraph("Status", "Ready")
@@ -2301,13 +2270,14 @@ task.spawn(function()
 		if tFarm and tFarm.Set then pcall(function() tFarm:Set(API.IsAutoFarm(),true) end) end
 		if tSolo and tSolo.Set then pcall(function() tSolo:Set(API.IsAutoStartSolo(),true) end) end
 		if tMini and tMini.Set then pcall(function() tMini:Set(API.IsAutoMinigame(),true) end) end
-		if tNoclip and tNoclip.Set then pcall(function() tNoclip:Set(API.IsNoclip(),true) end) end
+		if tNoclipFarm and tNoclipFarm.Set then pcall(function() tNoclipFarm:Set(API.IsNoclip(),true) end) end
+		if tNoclipColl and tNoclipColl.Set then pcall(function() tNoclipColl:Set(API.IsNoclip(),true) end) end
 		if tTween and tTween.Set then pcall(function() tTween:Set(API.IsTweenMode(),true) end) end
 	end end)
 	Win:Notify("FARM TASK loaded", "success", 3)
 end)
 
--- TAB: COLLECT 🍬
+-- TAB: COLLECT 🍬 (dengan Noclip + fixed ocWalk)
 local coll = Win:AddTab("Collect", utf8.char(127852))
 coll:AddSection("Candy")
 coll:AddToggle("Auto Collect Candy", false, function(v) OC.AutoCollectCandy=v end)
@@ -2319,6 +2289,21 @@ coll:AddDropdown("Pumpkin Method", {"walk","path"}, "walk", function(v) OC.Pumpk
 coll:AddSlider("Pumpkin Interval", 1, 10, 2, function(v) OC.PumpkinInterval=v end)
 coll:AddSection("Prompt Bypass")
 coll:AddDropdown("Bypass Method", {"Simulate","Alternative","Aggressive"}, "Simulate", function(v) OC.PromptBypass=v end)
+coll:AddSection("Movement")
+tNoclipColl = coll:AddToggle("Noclip (Tembus Tembok)", (State and State.Noclip) or false, function(v)
+	local api = getgenv().MorgueAPI
+	if api and api.SetNoclip then
+		api.SetNoclip(v)
+	else
+		local char = Players.LocalPlayer.Character
+		if char then
+			for _,d in ipairs(char:GetDescendants()) do
+				if d:IsA("BasePart") then d.CanCollide = not v end
+			end
+		end
+	end
+	if tNoclipFarm and tNoclipFarm.Set then pcall(function() tNoclipFarm:Set(v, true) end) end
+end):SetTooltip("Aktifkan saat collect candy/pumpkin biar tembus tembok")
 local collectStats = coll:AddParagraph("Collected", "Candy: 0 | Pumpkin: 0")
 task.spawn(function() while task.wait(1) do
 	if collectStats then local s=OC.Stats; pcall(function() collectStats:SetText(string.format("Candy: %d/%d | Pumpkin: %d/%d", s.ItemsCollected, s.ItemsFound, s.PumpkinsCollected, s.PumpkinsFound)) end) end
@@ -2395,4 +2380,4 @@ settings:AddButton("Unload Semua", function()
 	if OC and OC.Unload then pcall(OC.Unload) end
 end, "Yakin unload semua engine?")
 
-print("[MEGA FINAL v8.3] ✅ Loaded! 8 tabs: Rumah (new UI) | FARM TASK 💀 | Collect 🍬 | ESP 👁 | Movement 🏃 | Anti 🛡 | Tools 🔧 | Settings ⚙")
+print("[FINAL v8.4] ✅ Loaded! Noclip support di ocWalk + toggle di Collect.")
